@@ -34,3 +34,35 @@ def fetch_data():
         return {"data": response.data}
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/bdor")
+def get_ballon_dor_winners():
+    """
+    Route to fetch all rows from the ballon_dor table where year = 2024.
+    """
+    try:
+        # Query the ballon_dor table for rows where year = 2024
+        response = supabase.table("ballon_dor").select("*").eq("year", 2024).execute()
+
+        # Check if there are any results
+        if response.data:
+            return {"data": response.data}
+        else:
+            return {"message": "No results found for the year 2024."}
+    except Exception as e:
+        # Handle errors
+        return {"error": str(e)}
+    
+@app.get("/bdor/{year}")
+def get_ballon_dor_year(year: int):
+    try:
+        response = supabase.table("ballon_dor").select("*").eq("year", year).execute()
+
+        # Check if there are any results
+        if response.data:
+            return {"data": response.data}
+        else:
+            return {"message": f"No results found for the year {year}."}
+    except Exception as e:
+        # Handle errors
+        return {"error": str(e)}
