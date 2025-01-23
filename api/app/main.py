@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from termcolor import colored
+import random
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
@@ -10,9 +12,15 @@ load_dotenv()
 # Initialize FastAPI app
 app = FastAPI()
 
+COLORS = ["red", "green", "yellow", "blue", "magenta", "cyan", "white"]
+def get_random_color(message: str) -> str:
+    random_color = random.choice(COLORS)
+    return random_color
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Allow Next.js origin
+    allow_origins=["*"],
+    #allow_origins=["http://localhost:3000"],  # Allow Next.js origin
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,6 +63,7 @@ def get_ballon_dor_winners():
 
         # Check if there are any results
         if response.data:
+            print(colored(response.data))
             return {"data": response.data}
         else:
             return {"message": "No results found for the year 2024."}
