@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 import os
 
 # Load environment variables from .env file
@@ -8,6 +9,14 @@ load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Allow Next.js origin
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Get Supabase credentials from environment variables
 url: str = os.environ.get("SUPABASE_URL")
