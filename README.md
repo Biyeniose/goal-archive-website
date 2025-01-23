@@ -1,6 +1,6 @@
 # Goal Archive web app
 
-> #### Frontend
+> ## Frontend
 >
 > - `cd goal_archive`
 > - `npm install`
@@ -9,11 +9,15 @@
 
 ---
 
-## Backend server
-
-> #### Backend
+> ## Backend
 >
-> - `cd api`
+> - cd into the project
+> - `docker compose up --build`
+> - API runs on `localhost:90`
+> - `docker compose stop`
+> - Rebuild?
+> - `docker compose down`
+> - `docker compose up --build`
 
 <details>
 <summary>Docker instructions</summary>
