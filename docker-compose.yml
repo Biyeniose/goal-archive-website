@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ./api # Path to the folder containing the Dockerfile
+      dockerfile: Dockerfile
+    container_name: api-container # Name for the container
+    ports:
+      - "90:90" # Map container's port 90 to host's port 90
+    volumes:
+      - ./api:/code # Mount the local `api` directory to the container's `/code` directory for live updates
+    environment:
+      - PYTHONUNBUFFERED=1 # Optional: Ensures real-time log output in the container
+    restart: always # Automatically restart the container on failure
