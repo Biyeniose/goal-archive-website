@@ -13,6 +13,9 @@ import {
 
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import InitColorSchemeScript from "@mui/joy/InitColorSchemeScript";
+import { CssVarsProvider } from "@mui/joy/styles";
+import CssBaseline from "@mui/joy/CssBaseline";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -79,12 +82,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning={true}>
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${roboto.variable} ${montserrat.variable} ${openSans.variable} ${lato.variable} ${nunito.variable} ${ubuntu.variable} ${sourceCodePro.variable} ${raleway.variable} antialiased`}
       >
-        <Navbar />
-        {children}
+        <InitColorSchemeScript />
+        <CssVarsProvider>
+          <CssBaseline />
+          <Navbar />
+          {children}
+        </CssVarsProvider>
       </body>
     </html>
   );

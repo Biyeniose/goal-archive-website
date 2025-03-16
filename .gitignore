@@ -6,7 +6,7 @@ __pycache__/
 *.pyo
 *.pyd
 
-
+*.vscode
 # dependencies
 /node_modules
 /.pnp
