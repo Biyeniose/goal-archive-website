@@ -10,11 +10,22 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# GET all Players of a Team
+# GET details of a Player with PlayerID
+@router.get("/{player_id}")
+async def get_player_details(player_id: int, supabase: Client = Depends(get_supabase_client)):
+    try:
+        response = supabase.table('players').select("player_name, player_id, curr_team_id, age, position, dob, nation1, nation2, market_value, date_joined, contract_end, curr_gp, curr_ga, curr_goals, curr_assists").eq('player_id', player_id).execute()
 
+        player = response.data
+
+        return {"data": player}
+    
+    except Exception as e:
+        return {"error": str(e)}
+ 
 
 # Top G/A all leagues with Max age parameter
-@router.get("/mostga/topleagues")
+@router.get("/most_ga/topleagues")
 async def get_top_ga_players_top_leagues(max_age: int = Query(40, description="Maximum age of players"), supabase: Client = Depends(get_supabase_client)):
     """
     Route to fetch the top 20 players with the highest 'curr_ga' from specific leagues,

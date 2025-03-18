@@ -49,7 +49,6 @@ async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)
     except Exception as e:
         return {"error": str(e)}
 
-
 # GET All Players in a Team
 @router.get("/{team_id}/players")
 async def get_players_by_team_id(team_id: int, supabase: Client = Depends(get_supabase_client)):

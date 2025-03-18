@@ -39,62 +39,6 @@ async def read_root():
     return {"message": "Welcome to the FastAPI app with Supabase!"}
 
 
-
-
-# GET teams by league
-"""
-@app.get("/v1/teams/{league_id}")
-async def get_teams_by_league(league_id: int):
-    try:
-        # Query the ballon_dor table for rows where year = 2024
-        response = supabase.table("teams").select("team_id, team_name, logo_url").eq("league_id", league_id).execute()
-
-        # Check if there are any results
-        if response.data:
-            print(response.data)
-            return {"data": response.data}
-        else:
-            return {"message": "No results found for this league"}
-    except Exception as e:
-        # Handle errors
-        return {"error": str(e)}
-
-"""
-
-
-
-# GET teams by league
-@app.get("/v1/leagues")
-async def get_teams_by_league():
-    """
-    Fetch all leagues and include the country's logo URL from the teams table.
-    """
-    try:
-        # Define the list of league IDs to filter by
-        league_ids = [1, 2, 3, 4, 5, 7, 8, 10, 11, 12]
-
-        # Step 1: Fetch leagues data
-        leagues_response = supabase.table("leagues").select("league_id, league_name, country").in_("league_id", league_ids).execute()
-
-        if not leagues_response.data:
-            return {"message": f"No leagues found for league_ids: {league_ids}"}
-
-        # Step 2: Fetch logo URLs for each country
-        countries = list(set(league["country"] for league in leagues_response.data))  # Get unique country names
-        teams_response = supabase.table("teams").select("team_name, logo_url").in_("team_name", countries).execute()
-        country_logo_map = {team["team_name"]: team["logo_url"] for team in teams_response.data}  # Create a mapping of country to logo_url
-
-        # Step 3: Add country_url to each league's data
-        enriched_data = []
-        for league in leagues_response.data:
-            league["country_url"] = country_logo_map.get(league["country"], None)  # Add country_url
-            enriched_data.append(league)
-
-        return {"data": enriched_data}
-
-    except Exception as e:
-        return {"error": str(e)}
-
 # englsh players outside england
 @app.get("/players/outside_epl")
 async def get_top_english_players_outside_epl_and_mls():
