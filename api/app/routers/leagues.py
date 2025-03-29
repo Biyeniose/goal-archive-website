@@ -17,7 +17,7 @@ async def get_teams_by_league(supabase: Client = Depends(get_supabase_client)):
     """
     try:
         # Define the list of league IDs to filter by
-        league_ids = [1, 2, 3, 4, 5, 7, 8, 10, 11, 12]
+        league_ids = [1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 20]
 
         # Step 1: Fetch leagues data
         leagues_response = supabase.table("leagues").select("league_id, league_name, country").in_("league_id", league_ids).execute()
@@ -121,3 +121,24 @@ async def get_top_ga_by_league(league_id: int, max_age: int = Query(40, descript
     except Exception as e:
         return {"error": str(e)}
   
+
+@router.get("/{league_id}/nation2")
+async def get_team(league_id: str, supabase: Client = Depends(get_supabase_client), nation: str = Query("Nigeria", description="which country to search")):
+    try:
+        # Call the SQL function to fetch player and team details
+        response = supabase.rpc(
+            "get_players_by_nation2",
+            {"input_league_id": league_id, "input_nation": nation},  # Pass the player_id as BIGINT
+        ).execute()
+
+        player = response.data if response.data else None
+
+        if not player:
+            raise HTTPException(status_code=404, detail="Player not found")
+
+        return {"data": player}
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        return {"error": str(e)}

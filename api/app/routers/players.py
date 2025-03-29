@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from supabase import Client
 from ..dependencies import get_supabase_client
+from datetime import datetime, timedelta
+import pytz
 
 
 router = APIRouter(
@@ -9,6 +11,7 @@ router = APIRouter(
     dependencies=[Depends(get_supabase_client)],
     responses={404: {"description": "Not found"}},
 )
+
 
 # GET details of a Player with PlayerID
 @router.get("/{player_id}")
@@ -55,7 +58,7 @@ async def get_top_ga_players_top_leagues(max_age: int = Query(40, description="M
 
         # Step 2: Fetch top 20 players for those team IDs, sorted by 'curr_ga'
         players_response = supabase.table("players").select(
-            "player_name, player_id, curr_ga, curr_goals, curr_assists, curr_gp, age, curr_team_id, nation1, nation2"
+            "player_name, player_id, curr_ga, curr_goals, curr_assists, curr_gp, age, curr_team_id, nation1, nation2, foot, curr_subon, curr_suboff"
         ).in_("curr_team_id", all_team_ids).lt("age", max_age).not_.is_("curr_goals", None).order("curr_goals", desc=True).limit(10).execute()
 
         if not players_response.data:
@@ -92,7 +95,7 @@ async def get_top_ga_players_top_leagues(max_age: int = Query(40, description="M
 
 # Get most G/A in a League with max age as parameter
 @router.get("/most_ga/{league_id}")
-async def get_top_ga_by_league(league_id: int, max_age: int = Query(40, description="Maximum player age"), supabase: Client = Depends(get_supabase_client)):
+async def get_top_ga_by_league(league_id: int, max_age: int = Query(40, description="Maximum player age"),  limit: int = Query(3, description="Amount of players to return"), supabase: Client = Depends(get_supabase_client)):
     """
     Route to fetch the top players with the most G/A for a given league, including club_url.
     """
@@ -106,7 +109,7 @@ async def get_top_ga_by_league(league_id: int, max_age: int = Query(40, descript
         team_ids = [team["team_id"] for team in teams_response.data]
 
         # Get players under max_age for those team_ids, sorted by curr_ga, excluding NULLs
-        players_response = supabase.table("players").select("player_name, player_id, age, position, curr_gp, curr_ga, curr_goals, curr_assists, curr_team_id").in_("curr_team_id", team_ids).lt("age", max_age).not_.is_("curr_ga", None).order("curr_ga", desc=True).limit(3).execute()
+        players_response = supabase.table("players").select("player_name, player_id, age, position, curr_gp, curr_ga, curr_goals, curr_assists, curr_team_id").in_("curr_team_id", team_ids).lt("age", max_age).not_.is_("curr_ga", None).order("curr_ga", desc=True).limit(limit).execute()
 
         if players_response.data:
             processed_data = []
@@ -158,3 +161,103 @@ async def get_top_minutes_young_players(league_id: int, max_age: int = Query(40,
         return {"error": str(e)}
 
 
+def get_yesterday_toronto_date():
+    toronto_tz = pytz.timezone('America/Toronto')
+    return (datetime.now(toronto_tz) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+def parse_supabase_timestamp(timestamp_str):
+    """Handle all possible Supabase timestamp formats"""
+    # Remove timezone info if present (we'll treat all as UTC)
+    if 'Z' in timestamp_str:
+        timestamp_str = timestamp_str.replace('Z', '')
+    elif '+' in timestamp_str:
+        timestamp_str = timestamp_str.split('+')[0]
+    
+    # Handle different decimal precision formats
+    if '.' in timestamp_str:
+        # Standardize to 6 decimal places
+        parts = timestamp_str.split('.')
+        timestamp_str = f"{parts[0]}.{parts[1][:6]}"
+    
+    # Parse the cleaned string
+    try:
+        return datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f")
+    except ValueError:
+        try:
+            return datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            raise ValueError(f"Could not parse timestamp: {timestamp_str}")
+
+@router.get("/{player_id}/insta")
+async def get_player_instagram_stats(
+    player_id: int,
+    start_date: str = Query(default_factory=get_yesterday_toronto_date, 
+                          description="Start date in YYYY-MM-DD format (defaults to yesterday)"),
+    supabase: Client = Depends(get_supabase_client)
+):
+    try:
+        # Parse the input date (YYYY-MM-DD) and set to start of day in Toronto time
+        toronto_tz = pytz.timezone('America/Toronto')
+        start_date_naive = datetime.strptime(start_date, "%Y-%m-%d")
+        start_datetime_toronto = toronto_tz.localize(start_date_naive)
+        start_datetime_utc = start_datetime_toronto.astimezone(pytz.UTC)
+
+        # Get player name
+        player_response = supabase.table("players")\
+            .select("player_name")\
+            .eq("player_id", player_id)\
+            .single()\
+            .execute()
+        
+        player_name = player_response.data.get("player_name")
+        if not player_name:
+            raise HTTPException(status_code=404, detail="Player not found")
+
+        # Get follower stats
+        stats_response = supabase.table("followers")\
+            .select("updated_at, num_followers")\
+            .eq("player_id", player_id)\
+            .gte("updated_at", start_datetime_utc.isoformat())\
+            .order("updated_at")\
+            .execute()
+
+        stats_data = stats_response.data
+        if not stats_data:
+            raise HTTPException(status_code=404, 
+                             detail="No stats found for this player since the specified date")
+
+        # Process stats
+        processed_stats = []
+        for i, record in enumerate(stats_data):
+            try:
+                # Parse the timestamp using our custom function
+                utc_time = parse_supabase_timestamp(record['updated_at'])
+                utc_time = pytz.UTC.localize(utc_time)  # Make it timezone-aware
+                toronto_time = utc_time.astimezone(toronto_tz)
+                
+                diff = record['num_followers'] - stats_data[i-1]['num_followers'] if i > 0 else 0
+
+                processed_stats.append({
+                    "date": toronto_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "followers": record['num_followers'],
+                    "diff": diff
+                })
+            except ValueError as e:
+                continue  # Skip malformed timestamps or log the error
+
+        if not processed_stats:
+            raise HTTPException(status_code=500, 
+                             detail="Could not parse any valid timestamps from the database")
+
+        return {
+            "player_id": player_id,
+            "player_name": player_name,
+            "stats": processed_stats
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format. Use YYYY-MM-DD")
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
