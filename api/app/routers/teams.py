@@ -1,6 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from supabase import Client
 from ..dependencies import get_supabase_client
+from ..classes.team import TeamService, HighestStats
+from typing import List
+import requests, random
+
 
 router = APIRouter(
     prefix="/v1/teams",
@@ -27,79 +31,22 @@ async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)
     except Exception as e:
         # Handle errors
         return {"error": str(e)}
-    
-# Get most G/A in a team 
-@router.get("/{team_id}/most_ga")
-async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)):
-    """
-    Fetch the top 5 players with the highest curr_ga for a given team_id.
-    """
-    try:
-        # Call the SQL function to fetch player and team details
-        response = supabase.rpc(
-            "get_top_players_by_ga",
-            {"input_team_id": team_id}  # Pass the player_id as BIGINT
-        ).execute()
 
-        player = response.data if response.data else None
+# GET Highest G/A Per Team and Season
+@router.get("/{team_id}/stats", response_model=List[HighestStats])
+def get_highest_ga(team_id: int, season: int = Query(2024, description="year"), stat: str = Query("ga", description="Type of Stats"),  supabase: Client = Depends(get_supabase_client)):
+    service = TeamService(supabase)
+    stats = service.most_stats_by_team(team_id=team_id, season=season, stat=stat)
 
-        if not player:
-            raise HTTPException(status_code=404, detail="Player not found")
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
 
-        return {"data": player}
+    return stats
 
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        return {"error": str(e)}
-    
-# Get most assists in a team 
-@router.get("/{team_id}/most_goals")
-async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)):
-    """
-    Fetch the top 5 players with the highest curr_ga for a given team_id.
-    """
-    try:
-        # Call the SQL function to fetch player and team details
-        response = supabase.rpc(
-            "get_top_players_by_goals",
-            {"input_team_id": team_id}  # Pass the player_id as BIGINT
-        ).execute()
 
-        player = response.data if response.data else None
 
-        if not player:
-            raise HTTPException(status_code=404, detail="Player not found")
 
-        return {"data": player}
 
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        return {"error": str(e)}
-
-# Get most min in a team 
-@router.get("/{team_id}/most_min")
-async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)):
-    try:
-        # Call the SQL function to fetch player and team details
-        response = supabase.rpc(
-            "get_top_players_by_minutes",
-            {"input_team_id": team_id}  # Pass the player_id as BIGINT
-        ).execute()
-
-        player = response.data if response.data else None
-
-        if not player:
-            raise HTTPException(status_code=404, detail="Player not found")
-
-        return {"data": player}
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        return {"error": str(e)}
-    
 @router.get("/{team_id}/top_nations")
 async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)):
     try:

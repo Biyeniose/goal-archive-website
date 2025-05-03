@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from supabase import Client
 from ..dependencies import get_supabase_client
+from ..classes.league import StatsRanking, LeagueService
+from typing import List
+import requests, random
 
 router = APIRouter(
     prefix="/v1/leagues",
@@ -8,6 +11,18 @@ router = APIRouter(
     dependencies=[Depends(get_supabase_client)],
     responses={404: {"description": "Not found"}},
 )
+
+# GET Highest Goals Per League and Season
+@router.get("/{league_id}/stats", response_model=List[StatsRanking])
+def get_highest_ga(league_id: int, season: int = Query(2024, description="year"), age: int = Query(50, description="Maximum age"), stat: str = Query("ga", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):
+    service = LeagueService(supabase)
+    stats = service.most_stats_league(league_id=league_id, season=season, stat=stat, age=age)
+
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+
+    return stats
+
 
 # GET All Leagues with details
 @router.get("/domestic")
@@ -17,7 +32,7 @@ async def get_teams_by_league(supabase: Client = Depends(get_supabase_client)):
     """
     try:
         # Define the list of league IDs to filter by
-        league_ids = [1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 20]
+        league_ids = [1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 20, 25, 45, 75, 85, 291]
 
         # Step 1: Fetch leagues data
         leagues_response = supabase.table("leagues").select("league_id, league_name, country").in_("league_id", league_ids).execute()

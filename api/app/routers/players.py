@@ -1,17 +1,27 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from supabase import Client
 from ..dependencies import get_supabase_client
+from ..classes.player import PlayerService, PlayerBioInfo, PlayerStats
 from datetime import datetime, timedelta
-import pytz
+import pytz, requests, random
 
 
 router = APIRouter(
     prefix="/v1/players",
     tags=["players"],
-    dependencies=[Depends(get_supabase_client)],
+    #dependencies=[Depends(get_supabase_client)],
     responses={404: {"description": "Not found"}},
 )
 
+@router.get("/bio/{player_id}", response_model=PlayerBioInfo)
+def get_bio(player_id: int, supabase: Client = Depends(get_supabase_client)):
+    service = PlayerService(supabase)
+    player = service.get_player_bio(player_id)
+
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    return player
 
 # GET details of a Player with PlayerID
 @router.get("/{player_id}")
@@ -34,7 +44,66 @@ async def get_player_details(player_id: int, supabase: Client = Depends(get_supa
         raise e
     except Exception as e:
         return {"error": str(e)}
- 
+    
+
+# GET current stats of a Player with PlayerID
+@router.get("/{player_id}/det")
+async def get_player_details(player_id: int, supabase: Client = Depends(get_supabase_client)):
+    key = supabase.supabase_key
+    url = supabase.rest_url + "/rpc/execute_sql"
+
+    # Define the headers (including Authorization and API Key)
+    headers = {
+        "Authorization": "Bearer "+ key,
+        "apikey": key,
+        "Content-Type": "application/json"
+    }
+    
+    # SQL query to select players where nation1 = 'Nigeria' and limit the results to 5
+    query = f"""
+    SELECT row_to_json(p) 
+    FROM (
+        SELECT 
+            ps.season,
+            p.player_name, 
+            p.player_id, 
+            p.curr_team_id, 
+            t.team_name, 
+            t.logo_url, 
+            ps.goals, 
+            ps.assists, 
+            ps.gp,
+            p.nation1,
+            n1.logo_url AS nation1_url,
+            p.nation2,
+            n2.logo_url AS nation2_url
+        FROM players p
+        JOIN teams t ON p.curr_team_id = t.team_id
+        JOIN player_stats ps ON p.player_id = ps.player_id
+        LEFT JOIN teams n1 ON p.nation1 = n1.team_name
+        LEFT JOIN teams n2 ON p.nation2 = n2.team_name
+        WHERE p.player_id = {player_id}
+    ) p;
+    """
+
+    try:
+        # Call the SQL function to fetch player and team details
+        response = requests.post(url, headers=headers, json={"query": query})
+
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Return the response data as JSON
+            data = response.json()
+            clean_data = [entry["result"] for entry in data]
+            return clean_data
+        else:
+            # Handle errors if any
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
 
 # Top G/A all leagues with Max age parameter
 @router.get("/most_ga/topleagues")
@@ -261,3 +330,93 @@ async def get_player_instagram_stats(
         raise
     except Exception as e:
         return {"error": str(e)}
+    
+# Transfers of a player
+@router.get("/{player_id}/transfers")
+async def get_player_transfers(
+    player_id: int,
+    supabase: Client = Depends(get_supabase_client)
+):
+    try:
+        # Call the SQL function
+        response = supabase.rpc(
+            'get_player_transfers',
+            {'input_player_id': player_id}
+        ).execute()
+
+        transfers = response.data
+
+        if not transfers:
+            raise HTTPException(status_code=404, detail="No transfers found for this player")
+
+        return transfers
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Transfers of a player
+@router.get("/{player_id}/stats")
+async def get_player_transfers(
+    player_id: int,
+    year: int = Query(default=2023, description="Season year to filter by"),
+    supabase: Client = Depends(get_supabase_client)
+):
+    try:
+        # Call the SQL function
+        response = supabase.rpc(
+            'get_player_stats',
+            {
+                'input_player_id': player_id,
+                'input_year': year
+            }
+        ).execute()
+
+        stats = response.data
+
+        if not stats:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No stats found for player {player_id} in year {year}"
+            )
+
+        return stats
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+
+@router.get("/tr/rand")
+def get_random_transfer(supabase: Client = Depends(get_supabase_client)):
+    # Fetch all transfers with the player name and team names in a single query
+    response = (
+        supabase
+        .table("transfers")
+        .select("*, players(player_name), from_team:teams!transfers_from_team_id_fkey(team_name), to_team:teams!transfers_to_team_id_fkey(team_name)")
+        .eq("isLoan", False)
+        .gte("fee", 34000000)
+        .gte("date", "2012-01-01")  # Ensure date is after 2016
+        .execute()
+    )
+    
+    if not response.data:
+        raise HTTPException(status_code=404, detail="No valid transfers found")
+    
+    # Choose a random transfer
+    transfer = random.choice(response.data)
+    
+    # Extract player_name from the joined players table safely
+    transfer["player_name"] = transfer.get("players", {}).get("player_name", None)
+    
+    # Extract team names from the joined teams table safely
+    transfer["from_team_name"] = transfer.get("from_team", {}).get("team_name", None)
+    transfer["to_team_name"] = transfer.get("to_team", {}).get("team_name", None)
+    
+    # Remove nested player and team data to keep the response clean
+    transfer.pop("players", None)
+    transfer.pop("from_team", None)
+    transfer.pop("to_team", None)
+    
+    return transfer
+
