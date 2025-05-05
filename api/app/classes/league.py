@@ -22,10 +22,10 @@ class StatsRanking(BaseModel):
     nation2: Optional[str] = None
     nation1_url: Optional[str] = None
     nation2_url: Optional[str] = None 
-    goals: int
-    assists: int
-    ga: int
-    gp: int
+    goals: Optional[int] = None
+    assists: Optional[int] = None
+    ga: Optional[int] = None
+    gp: Optional[int] = None
 
 class LeagueRankings(BaseModel):
     comp_id: int
