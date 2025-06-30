@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Query, Path, Depends
-from supabase import create_client, Client
+#from fastapi import FastAPI, Query, Path, Depends
+#from supabase import create_client, Client
 from dotenv import load_dotenv
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import teams, leagues, bdor, players, stats
-from .dependencies import get_supabase_client
+#from .dependencies import get_supabase_client
 import os
 
 load_dotenv() # Load environment variables from .env file
@@ -19,8 +20,8 @@ app.add_middleware(
 )
 
 # Get Supabase credentials from environment variables
-url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_KEY")
+url = os.environ.get("SUPABASE_URL")
+key = os.environ.get("SUPABASE_KEY")
 
 if not url or not key:
     raise ValueError("SUPABASE_URL or SUPABASE_KEY are not set")

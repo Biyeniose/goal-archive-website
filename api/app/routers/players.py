@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from supabase import Client
 from ..dependencies import get_supabase_client
 from ..classes.player import PlayerService, PlayerBioInfo, PlayerStats
+from ..models.player import PlayerPageDataResponse
 from datetime import datetime, timedelta
 import pytz, requests, random
 
@@ -354,33 +355,17 @@ async def get_player_transfers(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Transfers of a player
-@router.get("/{player_id}/stats")
-async def get_player_transfers(
-    player_id: int,
-    year: int = Query(default=2023, description="Season year to filter by"),
-    supabase: Client = Depends(get_supabase_client)
-):
+# GET 
+@router.get("/{player_id}/infos", response_model=PlayerPageDataResponse)
+async def get_player_page_data(player_id: int, supabase: Client = Depends(get_supabase_client)):
     try:
-        # Call the SQL function
-        response = supabase.rpc(
-            'get_player_stats',
-            {
-                'input_player_id': player_id,
-                'input_year': year
-            }
-        ).execute()
-
-        stats = response.data
+        service = PlayerService(supabase)
+        stats = service.get_player_page_data(player_id=player_id)
 
         if not stats:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No stats found for player {player_id} in year {year}"
-            )
-
+            raise HTTPException(status_code=404, detail="Stats not found")
+        
         return stats
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
