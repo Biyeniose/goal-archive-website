@@ -1,13 +1,18 @@
 # app/models/league.py
 from typing import List, Dict, Optional
 from pydantic import BaseModel
-from .match import MatchData
+from app.models.team import Team
+    
+
+#######################
+class League(BaseModel):
+    league_id: int
+    league_name: str
+    logo: Optional[str]
 
 class TeamRank(BaseModel):
+    team: Team
     rank: str
-    team_id: int
-    team_name: str
-    team_logo: str
     info: Optional[str]
     points: int
     gp: int
@@ -37,17 +42,3 @@ class LeagueInfo(BaseModel):
     league_logo: Optional[str]
     type: str
     country_url: str
-
-class LeagueData(BaseModel):
-    info: LeagueInfo
-    ranks: List[TeamRank]
-    matches: List[MatchData]
-
-class LeagueDataResponse(BaseModel):
-    data: List[LeagueData]
-    
-class PastSeasonRanks(BaseModel):
-    past_ranks: List[TeamRank]
-
-class PastSeasonRanksResponse(BaseModel):
-    data: PastSeasonRanks

@@ -3,6 +3,7 @@ from supabase import Client
 from ..dependencies import get_supabase_client
 from ..classes.player import PlayerService, PlayerBioInfo, PlayerStats
 from ..models.player import PlayerPageDataResponse
+from app.models.response import PlayerSeasonStatsResponse
 from datetime import datetime, timedelta
 import pytz, requests, random
 
@@ -24,28 +25,19 @@ def get_bio(player_id: int, supabase: Client = Depends(get_supabase_client)):
 
     return player
 
-# GET details of a Player with PlayerID
-@router.get("/{player_id}")
-async def get_player_details(player_id: int, supabase: Client = Depends(get_supabase_client)):
+# GET Players stats in all competitions per season
+@router.get("/{player_id}/allstats", response_model=PlayerSeasonStatsResponse)
+async def get_season_stats(player_id: int, season: int = Query(2024, description="Season year"),supabase: Client = Depends(get_supabase_client)):
     try:
-        # Call the SQL function to fetch player and team details
-        response = supabase.rpc(
-            "get_player_with_team_details",
-            {"input_player_id": player_id}  # Pass the player_id as BIGINT
-        ).execute()
+        service = PlayerService(supabase)
+        stats = service.get_player_stats_all_seasons(player_id=player_id, season=season)
 
-        player = response.data[0] if response.data else None
-
-        if not player:
-            raise HTTPException(status_code=404, detail="Player not found")
-
-        return {"data": player}
-
-    except HTTPException as e:
-        raise e
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        
+        return stats
     except Exception as e:
-        return {"error": str(e)}
-    
+        raise HTTPException(status_code=500, detail=str(e))
 
 # GET current stats of a Player with PlayerID
 @router.get("/{player_id}/det")
@@ -163,47 +155,7 @@ async def get_top_ga_players_top_leagues(max_age: int = Query(40, description="M
     except Exception as e:
         return {"error": str(e)}
 
-# Get most G/A in a League with max age as parameter
-@router.get("/most_ga/{league_id}")
-async def get_top_ga_by_league(league_id: int, max_age: int = Query(40, description="Maximum player age"),  limit: int = Query(3, description="Amount of players to return"), supabase: Client = Depends(get_supabase_client)):
-    """
-    Route to fetch the top players with the most G/A for a given league, including club_url.
-    """
-    try:
-        # Get team_ids for the given league_id
-        teams_response = supabase.table("teams").select("team_id").eq("league_id", league_id).execute()
 
-        if not teams_response.data:
-            return {"message": f"No teams found for league_id: {league_id}"}
-
-        team_ids = [team["team_id"] for team in teams_response.data]
-
-        # Get players under max_age for those team_ids, sorted by curr_ga, excluding NULLs
-        players_response = supabase.table("players").select("player_name, player_id, age, position, curr_gp, curr_ga, curr_goals, curr_assists, curr_team_id").in_("curr_team_id", team_ids).lt("age", max_age).not_.is_("curr_ga", None).order("curr_ga", desc=True).limit(limit).execute()
-
-        if players_response.data:
-            processed_data = []
-            for player in players_response.data:
-                club_url = None
-                team_response = supabase.table("teams").select("logo_url").eq("team_id", player["curr_team_id"]).execute()
-                if team_response.data and len(team_response.data) > 0 and team_response.data[0].get("logo_url"):
-                    club_url = team_response.data[0]["logo_url"]
-
-                processed_player = {
-                    **player,
-                    "club_url": club_url,
-                    # "curr_team_id": None, # Removed this line
-                }
-
-                processed_data.append(processed_player)
-
-            return {"data": processed_data}
-        else:
-            return {"message": f"No players under {max_age} with non-NULL G/A found for teams in league_id: {league_id}"}
-
-    except Exception as e:
-        return {"error": str(e)}
-    
 # Most Minutes in a league by age (max age param)
 @router.get("/most_min/{league_id}")
 async def get_top_minutes_young_players(league_id: int, max_age: int = Query(40, description="Maximum player age"), supabase: Client = Depends(get_supabase_client)):
@@ -229,6 +181,11 @@ async def get_top_minutes_young_players(league_id: int, max_age: int = Query(40,
 
     except Exception as e:
         return {"error": str(e)}
+
+# GET player's STATS in all comps played in per season INCLUDE GA breakdown 9999 ALL COMPS
+
+# GET breakdown of GA against team for ALL comps played in person
+
 
 
 def get_yesterday_toronto_date():
@@ -331,31 +288,9 @@ async def get_player_instagram_stats(
         raise
     except Exception as e:
         return {"error": str(e)}
-    
-# Transfers of a player
-@router.get("/{player_id}/transfers")
-async def get_player_transfers(
-    player_id: int,
-    supabase: Client = Depends(get_supabase_client)
-):
-    try:
-        # Call the SQL function
-        response = supabase.rpc(
-            'get_player_transfers',
-            {'input_player_id': player_id}
-        ).execute()
 
-        transfers = response.data
 
-        if not transfers:
-            raise HTTPException(status_code=404, detail="No transfers found for this player")
-
-        return transfers
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# GET 
+# GET Player Information
 @router.get("/{player_id}/infos", response_model=PlayerPageDataResponse)
 async def get_player_page_data(player_id: int, supabase: Client = Depends(get_supabase_client)):
     try:
@@ -370,38 +305,4 @@ async def get_player_page_data(player_id: int, supabase: Client = Depends(get_su
         raise HTTPException(status_code=500, detail=str(e))
     
 
-
-
-@router.get("/tr/rand")
-def get_random_transfer(supabase: Client = Depends(get_supabase_client)):
-    # Fetch all transfers with the player name and team names in a single query
-    response = (
-        supabase
-        .table("transfers")
-        .select("*, players(player_name), from_team:teams!transfers_from_team_id_fkey(team_name), to_team:teams!transfers_to_team_id_fkey(team_name)")
-        .eq("isLoan", False)
-        .gte("fee", 34000000)
-        .gte("date", "2012-01-01")  # Ensure date is after 2016
-        .execute()
-    )
-    
-    if not response.data:
-        raise HTTPException(status_code=404, detail="No valid transfers found")
-    
-    # Choose a random transfer
-    transfer = random.choice(response.data)
-    
-    # Extract player_name from the joined players table safely
-    transfer["player_name"] = transfer.get("players", {}).get("player_name", None)
-    
-    # Extract team names from the joined teams table safely
-    transfer["from_team_name"] = transfer.get("from_team", {}).get("team_name", None)
-    transfer["to_team_name"] = transfer.get("to_team", {}).get("team_name", None)
-    
-    # Remove nested player and team data to keep the response clean
-    transfer.pop("players", None)
-    transfer.pop("from_team", None)
-    transfer.pop("to_team", None)
-    
-    return transfer
 

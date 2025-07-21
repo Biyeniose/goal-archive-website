@@ -1,6 +1,12 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from pydantic import BaseModel
 from datetime import date
+from typing import ClassVar
+from ..models.team import Team
+from app.models.league import League
+import importlib
+#if TYPE_CHECKING:
+ #  from ..models.league import League
 
 class NationInfo(BaseModel):
     team_id: Optional[int]
@@ -125,5 +131,62 @@ class SquadPlayer(BaseModel):
     contract_end: Optional[date]
     stats: PlayerStats
     season_year: int
+
+
+###################
+class PlayerNations(BaseModel):
+    nation1_id: Optional[int] = None
+    nation1: Optional[str] = None
+    nation1_logo: Optional[str] = None
+    nation2_id: Optional[int] = None
+    nation2: Optional[str] = None
+    nation2_logo: Optional[str] = None
+
+
+class PlayerBasicInfo(BaseModel):
+    id: Optional[int] = None    # <--- CHANGE HERE
+    name: Optional[str] = None 
+    current_age: Optional[int] = None
+    pic_url: Optional[str] = None
+    nations: Optional[PlayerNations] = None
+
+# /players/:id/allstats - player Season Stats models
+class PlayerSeasonGADist(BaseModel):
+    opp_team: Team
+    pct: Optional[float] = None
+    goals: Optional[int] = None
+    assists: Optional[int] = None
+    ga: Optional[int] = None
+
+class Player(BaseModel):
+    player_id: int
+    player_name: str
+    img: Optional[str] = None
+
+class PlayerSeasonInfo(BaseModel):
+    comp: League
+    #contributions: Optional[List[PlayerSeasonGADist]]
+    team: Team
+    season_year: int
+    age: Optional[int] = None
+    gp: Optional[int] = None
+    goals: Optional[int] = None
+    assists: Optional[int] = None
+    ga: Optional[int] = None
+    penalty_goals: Optional[int] = None
+    minutes: Optional[int] = None
+    minutes_pg: Optional[float] = None
+    goals_pg: Optional[float] = None
+    shots_pg: Optional[float] = None
+    shots_on_target_pg: Optional[float] = None
+    passes_pg: Optional[float] = None
+    pass_compl_pg: Optional[float] = None
+    take_ons_pg: Optional[float] = None
+    take_ons_won_pg: Optional[float] = None
+    ga_pg: Optional[float] = None
+    sca_pg: Optional[float] = None
+    id: int
+
+
 
 

@@ -59,7 +59,7 @@ class PlayerStats(BaseModel):
 
 
 # Matches section models
-class MatchTeamInfo(BaseModel):
+class MatchTeam(BaseModel):
     team_name: str
     team_id: int
     team_logo: Optional[str]
@@ -82,8 +82,8 @@ class Match(BaseModel):
     comp_id: int
     comp_name: Optional[str]
     comp_url: Optional[str]
-    home_team: MatchTeamInfo
-    away_team: MatchTeamInfo
+    home_team: MatchTeam
+    away_team: MatchTeam
     result: MatchResult
     round: Optional[str]
     match_date: Optional[str]
@@ -154,3 +154,28 @@ class SquadResponse(BaseModel):
 
 class TeamSquadDataResponse(BaseModel):
     data: SquadResponse
+
+####################
+
+class TeamNation(BaseModel):
+    nation_id: int
+    nation_name: str
+    logo_url: Optional[str]
+    
+class TeamBasicInfo(BaseModel):
+    team_id: int
+    team_name: str
+    team_logo: Optional[str]
+    league_id: Optional[int]
+
+
+class Team(BaseModel):
+    team_id: int
+    team_name: str
+    logo: Optional[str] = None
+
+
+
+
+
+

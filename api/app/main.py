@@ -3,7 +3,7 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import teams, leagues, bdor, players, stats
+from .routers import teams, leagues, bdor, players, stats, matches
 #from .dependencies import get_supabase_client
 import os
 
@@ -33,8 +33,7 @@ app.include_router(leagues.router)
 app.include_router(bdor.router)
 app.include_router(players.router)
 app.include_router(stats.router)
-
-
+app.include_router(matches.router)
 
 @app.get("/")
 async def read_root():

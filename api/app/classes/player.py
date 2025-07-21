@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from typing import List
 from pydantic import BaseModel
 from ..models.player import PlayerPageDataResponse
+from app.models.response import PlayerSeasonStatsResponse
 from supabase import Client
 import requests
 from typing import Optional
@@ -123,8 +124,6 @@ class PlayerService:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
-
 
     def get_player_page_data(self, player_id: int):
         try:
@@ -302,25 +301,117 @@ class PlayerService:
             ) as result;
             """
             
-            response = requests.post(self.url, headers=self.headers, json={"query": query})
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
             response.raise_for_status()
             
-            result = response.json()
-            
-            if not result or not result[0] or not result[0].get("result"):
+            result = response.json() 
+            # Debug prints (keep these for troubleshooting)
+            #print(f"Supabase raw response status: {response.status_code}")
+            #print(f"Supabase raw response text: {response.text}")
+            #print(f"Supabase response: {result}")
+            if not result or not result.get("data"):
                 raise HTTPException(
                     status_code=404,
-                    detail=f"No data found for team {player_id}"
+                    detail=f"No data found for"
                 )
-            
-            return PlayerPageDataResponse(**result[0]["result"])
-
-        except requests.exceptions.HTTPError as http_err:
-            error_detail = response.text if hasattr(response, 'text') else str(http_err)
-            raise HTTPException(status_code=500, detail=f"HTTP error occurred: {error_detail}")
+            return PlayerPageDataResponse(data=result["data"])
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
 
 
+    def get_player_stats_all_seasons(self, player_id: int, season: int):
+        query = f"""
+        WITH all_stats AS (
+            SELECT
+                -- Player info (same for all rows)
+                p.player_id,
+                p.player_name,
+                p.pic_url AS img,
+                
+                -- Array of all competitions/stats
+                json_agg(
+                    json_build_object(
+                        'comp', json_build_object(
+                            'league_id', l.league_id,
+                            'league_name', l.league_name,
+                            'logo', l.logo_url
+                        ),
+                        'team', json_build_object(
+                            'team_id', t.team_id,
+                            'team_name', t.team_name,
+                            'logo', t.logo_url
+                        ),
+                        'id', ps.stats_id,
+                        'season_year', ps.season_year,
+                        'age', ps.age,
+                        'gp', ps.gp,
+                        'goals', ps.goals,
+                        'assists', ps.assists,
+                        'ga', ps.ga,
+                        'penalty_goals', ps.penalty_goals,
+                        'minutes', ps.minutes,
+                        'minutes_pg', ps.minutes_pg,
+                        'goals_pg', ps.goals_pg,
+                        'shots_pg', ps.shots_pg,
+                        'shots_on_target_pg', ps.shots_on_target_pg,
+                        'passes_pg', ps.passes_pg,
+                        'pass_compl_pg', ps.pass_compl_pg,
+                        'take_ons_pg', ps.take_ons_pg,
+                        'take_ons_won_pg', ps.take_ons_won_pg,
+                        'ga_pg', ps.ga_pg,
+                        'sca_pg', ps.sca_pg
+                        
+                    )
+                ) AS stats_array
+            FROM player_stats ps
+            JOIN players p ON ps.player_id = p.player_id
+            JOIN leagues l ON ps.comp_id = l.league_id
+            JOIN teams t ON ps.team_id = t.team_id
+            WHERE ps.player_id = {player_id} AND ps.season_year = {season}
+            GROUP BY p.player_id, p.player_name, p.pic_url
+        )
+        SELECT 
+            json_build_object(
+                'data', json_build_object(
+                    'player', json_build_object(
+                        'player_id', player_id,
+                        'player_name', player_name,
+                        'img', img
+                    ),
+                    'stats', stats_array
+                )
+            ) AS result
+        FROM all_stats;       
+        """
 
+        try:
+            # Use "query" instead of "sql_query" for the parameter name
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}  # Changed from "sql_query" to "query"
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for match "
+                )
+                
+            # Parse the response according to the actual structure
+            return PlayerSeasonStatsResponse(data=result["data"])
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
 
