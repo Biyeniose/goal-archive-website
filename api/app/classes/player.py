@@ -278,3 +278,411 @@ class PlayerService:
                 detail=f"Unexpected error: {str(e)}"
             )
 
+
+    def get_matches_by_season(self, player_id: int, season: int):
+        query = f"""
+        WITH match_data AS (
+            SELECT 
+                l.xi,
+                l.id AS lineup_id,
+                l.team_id,
+                m.match_id,
+                m.match_date,
+                m.date_time_utc,
+                m.round,
+                m.season_year,
+                m."isDraw" AS draw,
+                m.extra_time AS et,
+                m.pens,
+                m.result,
+                m.comp_id,
+                lg.league_name AS comp,
+                lg.logo_url AS comp_logo,
+                json_build_object(
+                    'team_id', ht.team_id,
+                    'team_name', ht.team_name,
+                    'logo', ht.logo_url
+                ) AS home_team,
+                json_build_object(
+                    'goals', m.home_goals,
+                    'pen_goals', COALESCE(m.pen_home_goals, 0),
+                    'ranking', m.home_ranking
+                ) AS home_stats,
+                json_build_object(
+                    'team_id', at.team_id,
+                    'team_name', at.team_name,
+                    'logo', at.logo_url
+                ) AS away_team,
+                json_build_object(
+                    'goals', m.away_goals,
+                    'pen_goals', COALESCE(m.pen_away_goals, 0),
+                    'ranking', m.away_ranking
+                ) AS away_stats,
+                (
+                    SELECT json_build_object(
+                        'basic', json_build_object(
+                            'id', pms.id,
+                            'player_id', pms.player_id,
+                            'match_id', pms.match_id,
+                            'team_id', pms.team_id,
+                            'minutes', pms.minutes,
+                            'goals', pms.goals,
+                            'assists', pms.assists,
+                            'goals_assists', pms.goals_assists,
+                            'pens_made', pms.pens_made,
+                            'pens_att', pms.pens_att,
+                            'age', pms.age,
+                            'shots', pms.shots,
+                            'shots_on_target', pms.shots_on_target,
+                            'cards_yellow', pms.cards_yellow,
+                            'cards_red', pms.cards_red,
+                            'touches', pms.touches
+                        ),
+                        'defensive', json_build_object(
+                            'tackles', pms.tackles,
+                            'interceptions', pms.interceptions,
+                            'blocks', pms.blocks,
+                            'tackles_won', pms.tackles_won,
+                            'tackles_def_3rd', pms.tackles_def_3rd,
+                            'tackles_mid_3rd', pms.tackles_mid_3rd,
+                            'tackles_att_3rd', pms.tackles_att_3rd,
+                            'challenge_tackles', pms.challenge_tackles,
+                            'challenges', pms.challenges,
+                            'challenge_tackles_pct', pms.challenge_tackles_pct,
+                            'challenges_lost', pms.challenges_lost,
+                            'blocked_shots', pms.blocked_shots,
+                            'blocked_passes', pms.blocked_passes,
+                            'tackles_interceptions', pms.tackles_interceptions,
+                            'clearances', pms.clearances,
+                            'errors', pms.errors,
+                            'ball_recoveries', pms.ball_recoveries
+                        ),
+                        'attacking', json_build_object(
+                            'xg', pms.xg,
+                            'npxg', pms.npxg,
+                            'xg_assist', pms.xg_assist,
+                            'sca', pms.sca,
+                            'gca', pms.gca,
+                            'take_ons', pms.take_ons,
+                            'take_ons_won', pms.take_ons_won,
+                            'take_ons_won_pct', pms.take_ons_won_pct,
+                            'take_ons_tackled', pms.take_ons_tackled,
+                            'take_ons_tackled_pct', pms.take_ons_tackled_pct,
+                            'crosses', pms.crosses,
+                            'own_goals', pms.own_goals,
+                            'pens_won', pms.pens_won,
+                            'pens_conceded', pms.pens_conceded
+                        ),
+                        'passing', json_build_object(
+                            'passes_completed', pms.passes_completed,
+                            'passes', pms.passes,
+                            'passes_pct', pms.passes_pct,
+                            'progressive_passes', pms.progressive_passes,
+                            'passes_received', pms.passes_received,
+                            'progressive_passes_received', pms.progressive_passes_received
+                        ),
+                        'possession', json_build_object(
+                            'carries', pms.carries,
+                            'progressive_carries', pms.progressive_carries,
+                            'carries_distance', pms.carries_distance,
+                            'carries_progressive_distance', pms.carries_progressive_distance,
+                            'carries_into_final_third', pms.carries_into_final_third,
+                            'carries_into_penalty_area', pms.carries_into_penalty_area,
+                            'miscontrols', pms.miscontrols,
+                            'dispossessed', pms.dispossessed,
+                            'touches_def_pen_area', pms.touches_def_pen_area,
+                            'touches_def_3rd', pms.touches_def_3rd,
+                            'touches_mid_3rd', pms.touches_mid_3rd,
+                            'touches_att_3rd', pms.touches_att_3rd,
+                            'touches_att_pen_area', pms.touches_att_pen_area,
+                            'touches_live_ball', pms.touches_live_ball
+                        ),
+                        'discipline', json_build_object(
+                            'fouls', pms.fouls,
+                            'fouled', pms.fouled,
+                            'offsides', pms.offsides,
+                            'cards_yellow_red', pms.cards_yellow_red,
+                            'aerials_lost', pms.aerials_lost,
+                            'aerials_won', pms.aerials_won,
+                            'aerials_won_pct', pms.aerials_won_pct
+                        )
+                    )
+                    FROM player_match_stats pms
+                    WHERE pms.player_id = l.player_id
+                    AND pms.match_id = l.match_id
+                    AND pms.team_id = l.team_id
+                ) AS player_stats
+            FROM lineups l
+            JOIN matches m ON l.match_id = m.match_id
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            JOIN leagues lg ON m.comp_id = lg.league_id
+            WHERE l.player_id = {player_id}
+            AND m.season_year = {season}
+            ORDER BY m.match_date DESC
+        )
+        SELECT 
+            json_build_object(
+                'data', json_build_object(
+                    'matches', COALESCE(json_agg(
+                        json_build_object(
+                            'xi', md.xi,
+                            'lineup_id', md.lineup_id,
+                            'team_id', md.team_id,
+                            'match_info', json_build_object(
+                                'match_id', md.match_id,
+                                'match_date', md.match_date,
+                                'date_time_utc', md.date_time_utc,
+                                'round', md.round,
+                                'season_year', md.season_year,
+                                'draw', md.draw,
+                                'et', md.et,
+                                'pens', md.pens,
+                                'result', md.result,
+                                'comp_id', md.comp_id,
+                                'comp', md.comp,
+                                'comp_logo', md.comp_logo
+                            ),
+                            'teams', json_build_object(
+                                'home', json_build_object(
+                                    'team', md.home_team,
+                                    'stats', md.home_stats
+                                ),
+                                'away', json_build_object(
+                                    'team', md.away_team,
+                                    'stats', md.away_stats
+                                )
+                            ),
+                            'player_stats', COALESCE(md.player_stats, 'null'::json)
+                        )
+                    ), '[]'::json)
+                )
+            ) AS result
+        FROM match_data md;
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for player {player_id}"
+                )
+            
+            return result
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+    def get_matches_by_dates(self, player_id: int, start_date: str, end_date: str):
+        query = f"""
+        WITH match_data AS (
+            SELECT 
+                l.xi,
+                l.id AS lineup_id,
+                l.team_id,
+                m.match_id,
+                m.match_date,
+                m.date_time_utc,
+                m.round,
+                m.season_year,
+                m."isDraw" AS draw,
+                m.extra_time AS et,
+                m.pens,
+                m.result,
+                m.comp_id,
+                lg.league_name AS comp,
+                lg.logo_url AS comp_logo,
+                json_build_object(
+                    'team_id', ht.team_id,
+                    'team_name', ht.team_name,
+                    'logo', ht.logo_url
+                ) AS home_team,
+                json_build_object(
+                    'goals', m.home_goals,
+                    'pen_goals', COALESCE(m.pen_home_goals, 0),
+                    'ranking', m.home_ranking
+                ) AS home_stats,
+                json_build_object(
+                    'team_id', at.team_id,
+                    'team_name', at.team_name,
+                    'logo', at.logo_url
+                ) AS away_team,
+                json_build_object(
+                    'goals', m.away_goals,
+                    'pen_goals', COALESCE(m.pen_away_goals, 0),
+                    'ranking', m.away_ranking
+                ) AS away_stats,
+                (
+                    SELECT json_build_object(
+                        'basic', json_build_object(
+                            'id', pms.id,
+                            'player_id', pms.player_id,
+                            'match_id', pms.match_id,
+                            'team_id', pms.team_id,
+                            'minutes', pms.minutes,
+                            'goals', pms.goals,
+                            'assists', pms.assists,
+                            'goals_assists', pms.goals_assists,
+                            'pens_made', pms.pens_made,
+                            'pens_att', pms.pens_att,
+                            'age', pms.age,
+                            'shots', pms.shots,
+                            'shots_on_target', pms.shots_on_target,
+                            'cards_yellow', pms.cards_yellow,
+                            'cards_red', pms.cards_red,
+                            'touches', pms.touches
+                        ),
+                        'defensive', json_build_object(
+                            'tackles', pms.tackles,
+                            'interceptions', pms.interceptions,
+                            'blocks', pms.blocks,
+                            'tackles_won', pms.tackles_won,
+                            'tackles_def_3rd', pms.tackles_def_3rd,
+                            'tackles_mid_3rd', pms.tackles_mid_3rd,
+                            'tackles_att_3rd', pms.tackles_att_3rd,
+                            'challenge_tackles', pms.challenge_tackles,
+                            'challenges', pms.challenges,
+                            'challenge_tackles_pct', pms.challenge_tackles_pct,
+                            'challenges_lost', pms.challenges_lost,
+                            'blocked_shots', pms.blocked_shots,
+                            'blocked_passes', pms.blocked_passes,
+                            'tackles_interceptions', pms.tackles_interceptions,
+                            'clearances', pms.clearances,
+                            'errors', pms.errors,
+                            'ball_recoveries', pms.ball_recoveries
+                        ),
+                        'attacking', json_build_object(
+                            'xg', pms.xg,
+                            'npxg', pms.npxg,
+                            'xg_assist', pms.xg_assist,
+                            'sca', pms.sca,
+                            'gca', pms.gca,
+                            'take_ons', pms.take_ons,
+                            'take_ons_won', pms.take_ons_won,
+                            'take_ons_won_pct', pms.take_ons_won_pct,
+                            'take_ons_tackled', pms.take_ons_tackled,
+                            'take_ons_tackled_pct', pms.take_ons_tackled_pct,
+                            'crosses', pms.crosses,
+                            'own_goals', pms.own_goals,
+                            'pens_won', pms.pens_won,
+                            'pens_conceded', pms.pens_conceded
+                        ),
+                        'passing', json_build_object(
+                            'passes_completed', pms.passes_completed,
+                            'passes', pms.passes,
+                            'passes_pct', pms.passes_pct,
+                            'progressive_passes', pms.progressive_passes,
+                            'passes_received', pms.passes_received,
+                            'progressive_passes_received', pms.progressive_passes_received
+                        ),
+                        'possession', json_build_object(
+                            'carries', pms.carries,
+                            'progressive_carries', pms.progressive_carries,
+                            'carries_distance', pms.carries_distance,
+                            'carries_progressive_distance', pms.carries_progressive_distance,
+                            'carries_into_final_third', pms.carries_into_final_third,
+                            'carries_into_penalty_area', pms.carries_into_penalty_area,
+                            'miscontrols', pms.miscontrols,
+                            'dispossessed', pms.dispossessed,
+                            'touches_def_pen_area', pms.touches_def_pen_area,
+                            'touches_def_3rd', pms.touches_def_3rd,
+                            'touches_mid_3rd', pms.touches_mid_3rd,
+                            'touches_att_3rd', pms.touches_att_3rd,
+                            'touches_att_pen_area', pms.touches_att_pen_area,
+                            'touches_live_ball', pms.touches_live_ball
+                        ),
+                        'discipline', json_build_object(
+                            'fouls', pms.fouls,
+                            'fouled', pms.fouled,
+                            'offsides', pms.offsides,
+                            'cards_yellow_red', pms.cards_yellow_red,
+                            'aerials_lost', pms.aerials_lost,
+                            'aerials_won', pms.aerials_won,
+                            'aerials_won_pct', pms.aerials_won_pct
+                        )
+                    )
+                    FROM player_match_stats pms
+                    WHERE pms.player_id = l.player_id
+                    AND pms.match_id = l.match_id
+                    AND pms.team_id = l.team_id
+                ) AS player_stats
+            FROM lineups l
+            JOIN matches m ON l.match_id = m.match_id
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            JOIN leagues lg ON m.comp_id = lg.league_id
+            WHERE l.player_id = {player_id}
+            AND m.match_date BETWEEN '{start_date}' AND '{end_date}'
+            ORDER BY m.match_date DESC
+        )
+        SELECT 
+            json_build_object(
+                'data', json_build_object(
+                    'matches', COALESCE(json_agg(
+                        json_build_object(
+                            'xi', md.xi,
+                            'lineup_id', md.lineup_id,
+                            'team_id', md.team_id,
+                            'match_info', json_build_object(
+                                'match_id', md.match_id,
+                                'match_date', md.match_date,
+                                'date_time_utc', md.date_time_utc,
+                                'round', md.round,
+                                'season_year', md.season_year,
+                                'draw', md.draw,
+                                'et', md.et,
+                                'pens', md.pens,
+                                'result', md.result,
+                                'comp_id', md.comp_id,
+                                'comp', md.comp,
+                                'comp_logo', md.comp_logo
+                            ),
+                            'teams', json_build_object(
+                                'home', json_build_object(
+                                    'team', md.home_team,
+                                    'stats', md.home_stats
+                                ),
+                                'away', json_build_object(
+                                    'team', md.away_team,
+                                    'stats', md.away_stats
+                                )
+                            ),
+                            'player_stats', COALESCE(md.player_stats, 'null'::json)
+                        )
+                    ), '[]'::json)
+                )
+            ) AS result
+        FROM match_data md;
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for player {player_id}"
+                )
+            
+            return result
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+

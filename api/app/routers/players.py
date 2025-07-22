@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from supabase import Client
+from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.player import PlayerService
 from ..models.player import PlayerPageDataResponse
-from app.models.response import PlayerSeasonStatsResponse
+from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse
 from datetime import datetime, timedelta
 import pytz, requests, random
+from app.constants import GLOBAL_YEAR
 
 
 router = APIRouter(
@@ -41,11 +43,37 @@ async def get_player_page_data(player_id: int, supabase: Client = Depends(get_su
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# GET a player's stats in all comps by season
-
 # GET breakdown (teams+pens) of G/A for a season or by date range
 
 # GET list of all the games per season they were in xi or bench + match stats
+@router.get("/{player_id}/matches", response_model=PlayerMatchesResponse)
+async def get_player_match_statistics(player_id: int, season: int = Query(GLOBAL_YEAR, description="Season year"), supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_matches_by_season(player_id=player_id, season=season)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# GET list of games by date range
+@router.get("/{player_id}/matches-bydate", response_model=PlayerMatchesResponse)
+def get_matches_dates(player_id: int, start_date: date = Query("2024-11-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-03-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
+    # Validate date range
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="Start date must be before end date")
+    # Convert dates to string format for SQL
+    start_date_str = start_date.isoformat()
+    end_date_str = end_date.isoformat()
+
+    service = PlayerService(supabase)
+    stats = service.get_matches_by_dates(player_id=player_id, start_date=start_date_str, end_date=end_date_str)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
+
+# GET details of the last game where the player had a g/a
 
 
 def get_yesterday_toronto_date():

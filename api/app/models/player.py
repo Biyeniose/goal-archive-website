@@ -33,21 +33,6 @@ class MatchTeam(BaseModel):
     team_logo: str
     goals: Optional[int]
 
-class GoalData(BaseModel):
-    event_id: int
-    match_id: int
-    match_date: date
-    player_id: int
-    player_name: str
-    event_type: str
-    minute: int
-    add_minute: Optional[int]
-    isgoalscorer: bool  # Note lowercase to match response
-    home_team: MatchTeam
-    away_team: MatchTeam
-    total_match_goals: int
-    total_match_assists: int
-
 class Comp(BaseModel):
     comp_id: int
     comp_name: str
@@ -175,30 +160,6 @@ class PlayerBasicInfo(BaseModel):
     nations: Optional[PlayerNations] = None
 
 
-
-class PlayerSeasonInfo(BaseModel):
-    comp: League
-    #contributions: Optional[List[PlayerSeasonGADist]]
-    team: Team
-    season_year: int
-    age: Optional[int] = None
-    gp: Optional[int] = None
-    goals: Optional[int] = None
-    assists: Optional[int] = None
-    ga: Optional[int] = None
-    penalty_goals: Optional[int] = None
-    minutes: Optional[int] = None
-    minutes_pg: Optional[float] = None
-    goals_pg: Optional[float] = None
-    shots_pg: Optional[float] = None
-    shots_on_target_pg: Optional[float] = None
-    passes_pg: Optional[float] = None
-    pass_compl_pg: Optional[float] = None
-    take_ons_pg: Optional[float] = None
-    take_ons_won_pg: Optional[float] = None
-    ga_pg: Optional[float] = None
-    sca_pg: Optional[float] = None
-    id: int
 
 
 

@@ -17,7 +17,8 @@ class MatchInfo(BaseModel):
     result: str
     comp_id: int
     comp: str
-    comp_logo: str
+    comp_logo: Optional[str] = None
+
 
 class MatchGoals(BaseModel):
     goals: Optional[int] = None
@@ -54,6 +55,100 @@ class MatchTeamStats(BaseModel):
     pass_att: Optional[int] = None
     pass_succ: Optional[int] = None
     pass_acc: Optional[float] = None
+
+class BasicStats(BaseModel):
+    id: int
+    player_id: int
+    match_id: int
+    team_id: int
+    minutes: int
+    goals: int
+    assists: int
+    goals_assists: Optional[int] = None
+    pens_made: int
+    pens_att: int
+    age: int
+    shots: int
+    shots_on_target: int
+    cards_yellow: int
+    cards_red: int
+    touches: int
+
+class DefensiveStats(BaseModel):
+    tackles: Optional[int] = None
+    interceptions: Optional[int] = None
+    blocks: Optional[int] = None
+    tackles_won: Optional[int] = None
+    tackles_def_3rd: Optional[int] = None
+    tackles_mid_3rd: Optional[int] = None
+    tackles_att_3rd: Optional[int] = None
+    challenge_tackles: Optional[int] = None
+    challenges: Optional[int] = None
+    challenge_tackles_pct: Optional[float] = None
+    challenges_lost: Optional[int] = None
+    blocked_shots: Optional[int] = None
+    blocked_passes: Optional[int] = None
+    tackles_interceptions: Optional[int] = None
+    clearances: Optional[int] = None
+    errors: Optional[int] = None
+    ball_recoveries: Optional[int] = None
+
+class AttackingStats(BaseModel):
+    xg: Optional[float] = None
+    npxg: Optional[float] = None
+    xg_assist: Optional[float] = None
+    sca: Optional[int] = None
+    gca: Optional[int] = None
+    take_ons: Optional[int] = None
+    take_ons_won: Optional[int] = None
+    take_ons_won_pct: Optional[float] = None
+    take_ons_tackled: Optional[int] = None
+    take_ons_tackled_pct: Optional[float] = None
+    crosses: Optional[int] = None
+    own_goals: Optional[int] = None
+    pens_won: Optional[int] = None
+    pens_conceded: Optional[int] = None
+
+class PassingStats(BaseModel):
+    passes_completed: Optional[int] = None
+    passes: Optional[int] = None
+    passes_pct: Optional[float] = None
+    progressive_passes: Optional[int] = None
+    passes_received: Optional[int] = None
+    progressive_passes_received: Optional[int] = None
+
+class PossessionStats(BaseModel):
+    carries: Optional[int] = None
+    progressive_carries: Optional[int] = None
+    carries_distance: Optional[int] = None
+    carries_progressive_distance: Optional[int] = None
+    carries_into_final_third: Optional[int] = None
+    carries_into_penalty_area: Optional[int] = None
+    miscontrols: Optional[int] = None
+    dispossessed: Optional[int] = None
+    touches_def_pen_area: Optional[int] = None
+    touches_def_3rd: Optional[int] = None
+    touches_mid_3rd: Optional[int] = None
+    touches_att_3rd: Optional[int] = None
+    touches_att_pen_area: Optional[int] = None
+    touches_live_ball: Optional[int] = None
+
+class DisciplineStats(BaseModel):
+    fouls: Optional[int] = None
+    fouled: Optional[int] = None
+    offsides: Optional[int] = None
+    cards_yellow_red: Optional[int] = None
+    aerials_lost: Optional[int] = None
+    aerials_won: Optional[int] = None
+    aerials_won_pct: Optional[float] = None
+
+class PlayerMatchStatsDiv(BaseModel):
+    basic: BasicStats
+    defensive: Optional[DefensiveStats] = None
+    attacking: Optional[AttackingStats] = None
+    passing: Optional[PassingStats] = None
+    possession: Optional[PossessionStats] = None
+    discipline: Optional[DisciplineStats] = None
 
 
 class PlayerMatchStats(BaseModel):
