@@ -48,28 +48,43 @@ class GoalData(BaseModel):
     total_match_goals: int
     total_match_assists: int
 
-class PlayerStats(BaseModel):
+class Comp(BaseModel):
     comp_id: int
     comp_name: str
     comp_url: Optional[str]
+
+class PlayerStats(BaseModel):
     player_id: int
-    season_year: int
     player_name: str
+    season_year: int
     age: int
-    team_id: int
-    team_name: str
-    team_logo: str
-    ga: int
-    goals: int
-    assists: int
-    penalty_goals: int
-    gp: int
-    minutes: int
-    subbed_on: Optional[int]
-    subbed_off: Optional[int]
-    yellows: Optional[int]
-    yellows2: Optional[int]
-    reds: Optional[int]
+    comp: Comp
+    team: Team
+    ga: Optional[int] = None
+    ga_pg: Optional[float] = None
+    goals: Optional[int] = None
+    goals_pg: Optional[float] = None
+    assists: Optional[int] = None
+    assists_pg: Optional[float] = None
+    penalty_goals: Optional[int] = None
+    gp: Optional[int] = None
+    minutes: Optional[int] = None
+    minutes_pg: Optional[float] = None
+    cs: Optional[int] = None
+    pass_compl_pg: Optional[float] = None
+    passes_pg: Optional[float] = None
+    errors_pg: Optional[float] = None
+    shots_pg: Optional[float] = None
+    shots_on_target_pg: Optional[float] = None
+    sca_pg: Optional[float] = None
+    gca_pg: Optional[float] = None
+    take_ons_pg: Optional[float] = None
+    take_ons_won_pg: Optional[float] = None
+    goals_concede: Optional[int] = None
+    yellows: Optional[int] = None
+    yellows2: Optional[int] = None
+    reds: Optional[int] = None
+    own_goals: Optional[int] = None
     stats_id: int
 
 class PlayerNations(BaseModel):
@@ -112,7 +127,6 @@ class PlayerInfo(BaseModel):
 class PlayerPageData(BaseModel):
     info: PlayerInfo
     transfers: List[Transfer]
-    goal_data: List[GoalData]
     stats: List[PlayerStats]
 
 class PlayerPageDataResponse(BaseModel):

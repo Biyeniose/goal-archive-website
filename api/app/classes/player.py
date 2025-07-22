@@ -76,55 +76,7 @@ class PlayerService:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
         
-    # add stats of their 2 most recent season
-    def get_player_bio(self, player_id: int):
-        query = f"""
-        SELECT row_to_json(p) 
-        FROM (
-            SELECT 
-                p.player_id,
-                p.player_name,
-                p.full_name,
-                p."isRetired",
-                p.curr_team_id,
-                t.team_name AS curr_team_name,
-                t.logo_url AS curr_team_logo,
-                p.curr_number,
-                p."onLoan",
-                p.position,
-                p.dob,
-                p.age,
-                p.pob,
-                p.nation1_id,
-                p.nation2_id,
-                n1.team_name AS nation1,
-                n2.team_name AS nation2,
-                n1.logo_url AS nation1_url,
-                n2.logo_url AS nation2_url,
-                p.market_value,
-                p.height,
-                p.foot,
-                p.date_joined,
-                p.contract_end,
-            FROM players p
-            LEFT JOIN teams t ON p.curr_team_id = t.team_id
-            LEFT JOIN teams n1 ON p.nation1_id = n1.team_id
-            LEFT JOIN teams n2 ON p.nation2_id = n2.team_id
-            WHERE p.player_id = {player_id}
-        ) p;
-        """
-
-        try:
-            response = requests.post(self.url, headers=self.headers, json={"query": query})
-            if response.status_code == 200:
-                results = response.json()
-                data = [PlayerBioInfo(**entry["result"]) for entry in results]
-                return data[0] if data else None
-            else:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
+    
     def get_player_page_data(self, player_id: int):
         try:
             query = f"""
@@ -209,79 +161,49 @@ class PlayerService:
                 ORDER BY tr.date DESC
             ),
 
-            goal_data AS (
-                SELECT
-                    me.id as event_id,
-                    me.match_id,
-                    m.match_date,
-                    CASE
-                        WHEN me.active_player_id = {player_id} THEN me.active_player_id
-                        ELSE me.passive_player_id
-                    END as player_id,
-                    p.player_name,
-                    me.event_type,
-                    me.minute,
-                    me.add_minute,
-                    CASE
-                        WHEN me.active_player_id = {player_id} THEN TRUE
-                        ELSE FALSE
-                    END as isGoalScorer,
-                    json_build_object(
-                        'team_name', ht.team_name,
-                        'team_id', m.home_id,
-                        'team_logo', ht.logo_url,
-                        'goals', m.home_goals
-                    ) as home_team,
-                    json_build_object(
-                        'team_name', at.team_name,
-                        'team_id', m.away_id,
-                        'team_logo', at.logo_url,
-                        'goals', m.away_goals
-                    ) as away_team
-                FROM match_events me
-                JOIN matches m ON me.match_id = m.match_id
-                JOIN players p ON
-                    (me.active_player_id = {player_id} AND p.player_id = me.active_player_id) OR
-                    (me.passive_player_id = {player_id} AND p.player_id = me.passive_player_id)
-                JOIN teams ht ON m.home_id = ht.team_id
-                JOIN teams at ON m.away_id = at.team_id
-                WHERE (me.active_player_id = {player_id} OR me.passive_player_id = {player_id})
-                AND m.season_year = 2024
-                AND me.event_type = 'Goal'
-            ),
-            latest_goal_data AS (
-            SELECT
-                gd.*,
-                COUNT(CASE WHEN gd.isGoalScorer THEN 1 END) OVER (PARTITION BY gd.match_id) as total_match_goals,
-                COUNT(CASE WHEN NOT gd.isGoalScorer THEN 1 END) OVER (PARTITION BY gd.match_id) as total_match_assists
-            FROM goal_data gd
-            ORDER BY gd.match_date DESC
-            LIMIT 50
-            ),
             player_stats AS (
                 SELECT
-                    ps.comp_id,
-                    l.league_name as comp_name,
-                    l.logo_url as comp_url,
                     ps.player_id,
-                    ps.season_year,
                     p.player_name,
+                    ps.season_year,
                     ps.age,
-                    ps.team_id,
-                    t.team_name,
-                    t.logo_url as team_logo,
+                    json_build_object(
+                        'comp_id', ps.comp_id,
+                        'comp_name', l.league_name,
+                        'comp_url', l.logo_url
+                    ) as comp,
+                    json_build_object(
+                        'team_id', ps.team_id,
+                        'team_name', t.team_name,
+                        'logo', t.logo_url
+                    ) as team,
                     ps.ga,
+                    ps.ga_pg,
                     ps.goals,
+                    ps.goals_pg,
                     ps.assists,
+                    ps.assists_pg,
                     ps.penalty_goals,
                     ps.gp,
                     ps.minutes,
-                    ps.subbed_on,
-                    ps.subbed_off,
+                    ps.minutes_pg,
+                    ps.cs,
+                    ps.pass_compl_pg,
+                    ps.passes_pg,
+                    ps.errors_pg,
+                    ps.shots_pg,
+                    ps.shots_on_target_pg,
+                    ps.sca_pg,
+                    ps.gca_pg,
+                    ps.take_ons_pg,
+                    ps.take_ons_won_pg,
+                    ps.goals_concede,
                     ps.yellows,
                     ps.yellows2,
                     ps.reds,
+                    ps.own_goals,
                     ps.stats_id
+                    
                 FROM player_stats ps
                 JOIN players p ON ps.player_id = p.player_id
                 JOIN teams t ON ps.team_id = t.team_id
@@ -295,7 +217,6 @@ class PlayerService:
                 'data', json_build_object(
                     'info', (SELECT row_to_json(player_info) FROM player_info),
                     'transfers', (SELECT coalesce(json_agg(row_to_json(player_transfers)), '[]'::json) FROM player_transfers),
-                    'goal_data', (SELECT coalesce(json_agg(row_to_json(latest_goal_data)), '[]'::json) FROM latest_goal_data),
                     'stats', (SELECT coalesce(json_agg(row_to_json(player_stats)), '[]'::json) FROM player_stats)
                 )
             ) as result;
@@ -307,18 +228,15 @@ class PlayerService:
                 json={"sql_query": query}
             )
             response.raise_for_status()
-            
             result = response.json() 
-            # Debug prints (keep these for troubleshooting)
             #print(f"Supabase raw response status: {response.status_code}")
-            #print(f"Supabase raw response text: {response.text}")
             #print(f"Supabase response: {result}")
             if not result or not result.get("data"):
                 raise HTTPException(
                     status_code=404,
                     detail=f"No data found for"
                 )
-            return PlayerPageDataResponse(data=result["data"])
+            return result
         except Exception as e:
             raise HTTPException(
                 status_code=500,
