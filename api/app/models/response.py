@@ -2,7 +2,7 @@ from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
 from datetime import date
 from app.models.player import Player, PlayerBasicInfo, PlayerStats
-from app.models.match import MatchInfo, MatchTeams, MatchEvents, Match, PlayerMatchStats, MatchTeamsBasic, PlayerMatchStatsDiv
+from app.models.match import MatchInfo, MatchTeams, MatchEvents, Match, PlayerMatchStats, MatchTeamsBasic, PlayerMatchStatsDiv, BasicStats
 from app.models.league import LeagueInfo, TeamRank
 from app.models.team import Team, TeamInfo, Transfer, SquadPlayer
 
@@ -26,6 +26,16 @@ class PlayerMatchesData(BaseModel):
     matches: List[PlayerMatch]
 class PlayerMatchesResponse(BaseModel):
     data: PlayerMatchesData
+
+# /players/:id/recent-goals
+class PlayerRecentGA(BaseModel):
+    teams: MatchTeamsBasic
+    match_info: MatchInfo
+    player_stats: Optional[BasicStats] = None
+class PlayerRecentGAData(BaseModel):
+    recent_ga: List[PlayerRecentGA]
+class PlayerRecentGAResponse(BaseModel):
+    data: PlayerRecentGAData
 
 
 # TEAM RESPONSES

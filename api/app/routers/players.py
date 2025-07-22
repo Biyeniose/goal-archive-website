@@ -4,7 +4,7 @@ from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.player import PlayerService
 from ..models.player import PlayerPageDataResponse
-from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse
+from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse, PlayerRecentGAResponse
 from datetime import datetime, timedelta
 import pytz, requests, random
 from app.constants import GLOBAL_YEAR
@@ -74,6 +74,16 @@ def get_matches_dates(player_id: int, start_date: date = Query("2024-11-01", des
     return stats
 
 # GET details of the last game where the player had a g/a
+@router.get("/{player_id}/recent-goals", response_model=PlayerRecentGAResponse)
+async def get_player_recent_ga(player_id: int, supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_recent_ga(player_id=player_id)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def get_yesterday_toronto_date():

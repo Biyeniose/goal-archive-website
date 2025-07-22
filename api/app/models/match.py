@@ -61,18 +61,18 @@ class BasicStats(BaseModel):
     player_id: int
     match_id: int
     team_id: int
-    minutes: int
-    goals: int
-    assists: int
+    minutes: Optional[int] = None
+    goals: Optional[int] = None
+    assists: Optional[int] = None
     goals_assists: Optional[int] = None
-    pens_made: int
-    pens_att: int
-    age: int
-    shots: int
-    shots_on_target: int
-    cards_yellow: int
-    cards_red: int
-    touches: int
+    pens_made: Optional[int] = None
+    pens_att: Optional[int] = None
+    age: Optional[int] = None
+    shots: Optional[int] = None
+    shots_on_target: Optional[int] = None
+    cards_yellow: Optional[int] = None
+    cards_red: Optional[int] = None
+    touches: Optional[int] = None
 
 class DefensiveStats(BaseModel):
     tackles: Optional[int] = None
