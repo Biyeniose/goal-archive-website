@@ -400,5 +400,121 @@ class TeamService:
             )
         
 
+    def get_team_matches_by_year(self, team_id: str, season: int):
+        query = f"""
+        SELECT json_build_object(
+            'data', json_build_object(
+                'matches', json_agg(
+                    json_build_object(
+                        'teams', json_build_object(
+                            'home', json_build_object(
+                                'team', json_build_object(
+                                    'team_id', match_data.home_id,
+                                    'team_name', match_data.home_team_name,
+                                    'logo', match_data.home_logo_url
+                                ),
+                                'stats', json_build_object(
+                                    'goals', COALESCE(match_data.home_goals, 0),
+                                    'pen_goals', COALESCE(match_data.pen_home_goals, 0),
+                                    'ranking', match_data.home_ranking
+                                )
+                            ),
+                            'away', json_build_object(
+                                'team', json_build_object(
+                                    'team_id', match_data.away_id,
+                                    'team_name', match_data.away_team_name,
+                                    'logo', match_data.away_logo_url
+                                ),
+                                'stats', json_build_object(
+                                    'goals', COALESCE(match_data.away_goals, 0),
+                                    'pen_goals', COALESCE(match_data.pen_away_goals, 0),
+                                    'ranking', match_data.away_ranking
+                                )
+                            )
+                        ),
+                        'match_info', json_build_object(
+                            'match_id', match_data.match_id,
+                            'match_date', match_data.match_date,
+                            'date_time_utc', match_data.date_time_utc,
+                            'round', match_data.round,
+                            'season_year', match_data.season_year,
+                            'draw', match_data."isDraw",
+                            'et', match_data.extra_time,
+                            'pens', match_data.pens,
+                            'result', match_data.result,
+                            'comp_id', match_data.comp_id,
+                            'comp', match_data.league_name,
+                            'comp_logo', match_data.league_logo_url
+                        )
+                    )
+                )
+            )
+        ) as result
+        FROM (
+            SELECT 
+                m.match_id,
+                m.match_date,
+                m.home_ranking,
+                m.away_ranking,
+                m.date_time_utc,
+                m.round,
+                m.season_year,
+                m."isDraw",
+                m.extra_time,
+                m.pens,
+                m.result,
+                m.comp_id,
+                m.home_id,
+                m.away_id,
+                m.home_goals,
+                m.away_goals,
+                COALESCE(m.pen_home_goals, 0) as pen_home_goals,
+                COALESCE(m.pen_away_goals, 0) as pen_away_goals,
+                ht.team_name as home_team_name,
+                ht.logo_url as home_logo_url,
+                at.team_name as away_team_name,
+                at.logo_url as away_logo_url,
+                l.league_name,
+                l.logo_url as league_logo_url
+            FROM matches m
+            LEFT JOIN teams ht ON m.home_id = ht.team_id
+            LEFT JOIN teams at ON m.away_id = at.team_id
+            LEFT JOIN leagues l ON m.comp_id = l.league_id
+            WHERE (m.home_id = {team_id} OR m.away_id = {team_id}) AND m.season_year = {season}
+            ORDER BY m.match_date DESC
+            LIMIT 300
+        ) as match_data;
+
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response status: {response.status_code}")
+            #print(f"Supabase raw response text: {response.text}")
+            # The response structure is {"data": {...}} not a list with result[0]
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for team {team_id}"
+                )
+            # Parse the response according to the actual structure
+            return result
+            
+        except requests.exceptions.HTTPError as http_err:
+            error_detail = response.text if hasattr(response, 'text') else str(http_err)
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Supabase error: {error_detail}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
 
 

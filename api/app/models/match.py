@@ -9,12 +9,12 @@ class MatchInfo(BaseModel):
     match_id: int
     match_date: str
     date_time_utc: Optional[str] = None
-    round: str
+    round: Optional[str] = None
     season_year: int
-    draw: bool
-    et: bool
-    pens: bool
-    result: str
+    draw: Optional[bool] = None
+    et: Optional[bool] = None
+    pens: Optional[bool] = None
+    result: Optional[str] = None
     comp_id: int
     comp: str
     comp_logo: Optional[str] = None

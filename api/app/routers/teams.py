@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from supabase import Client
 from ..dependencies import get_supabase_client
 from ..classes.team import TeamService, TeamPlayersStatsResponse
-from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse
+from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse, LeagueMatchesResponse
+from app.constants import GLOBAL_YEAR
 from typing import List
 
 
@@ -52,12 +53,16 @@ async def get_team(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# GET "team squad" which is just table of ALL Stats
-
 # GET all matches in a comp in a year
+@router.get("/{team_id}/matches", response_model=LeagueMatchesResponse)
+def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
+    service = TeamService(supabase)
+    stats = service.get_team_matches_by_year(team_id=team_id, season=season)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
 
-
-# GET all transfers in a comp in a year
+# GET all transfers in a year and total incoming/outgoing fees
 
 
 

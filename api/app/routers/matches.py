@@ -26,3 +26,8 @@ async def get_match_data(match_id: int, supabase: Client = Depends(get_supabase_
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# get the last 6 matches, these 2 teams have played against each other
+
+# get a manager's record against a certian team
