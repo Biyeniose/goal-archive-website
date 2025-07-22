@@ -1,45 +1,10 @@
 from fastapi import HTTPException
 from typing import List
 from pydantic import BaseModel
-from ..models.player import PlayerPageDataResponse
 from app.models.response import PlayerSeasonStatsResponse
 from supabase import Client
 import requests
 from typing import Optional
-
-
-# Define a Pydantic model
-class PlayerBioInfo(BaseModel):
-    player_id: int
-    player_name: str
-    full_name: Optional[str] = None
-    isRetired: Optional[bool] = None
-    onLoan: Optional[bool] = None
-    curr_team_id: Optional[int] = None
-    curr_team_name: Optional[str] = None
-    curr_team_logo: Optional[str] = None
-    curr_number: Optional[int] = None
-    position: Optional[str] = None
-    dob: str 
-    age: Optional[int] = None
-    pob: Optional[str] = None
-    nation1_id: Optional[int] = None
-    nation2_id: Optional[int] = None 
-    nation1: Optional[str] = None
-    nation2: Optional[str] = None
-    nation1_url: Optional[str] = None
-    nation2_url: Optional[str] = None 
-    market_value: Optional[float] = None
-    height: Optional[float] = None
-    foot: Optional[str] = None
-    date_joined: Optional[str] = None
-    contract_end: Optional[str] = None
-
-class PlayerStats(BaseModel):
-    player_id: int
-    age: Optional[int] = None
-    isRetired: bool
-
 
 class PlayerService:
     def __init__(self, supabase_client: Client):
@@ -52,29 +17,6 @@ class PlayerService:
             "Content-Type": "application/json"
         }
 
-    def get_player_details(self, player_id: int):
-        query = f"""
-        SELECT row_to_json(p) 
-        FROM (
-            SELECT 
-                player_id,
-                age,
-                "isRetired"
-            FROM players p
-            WHERE p.player_id = {player_id}
-        ) p;
-        """
-
-        try:
-            response = requests.post(self.url, headers=self.headers, json={"query": query})
-            if response.status_code == 200:
-                results = response.json()
-                data = [PlayerStats(**entry["result"]) for entry in results]
-                return data[0] if data else None
-            else:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
         
     
     def get_player_page_data(self, player_id: int):
@@ -163,10 +105,11 @@ class PlayerService:
 
             player_stats AS (
                 SELECT
-                    ps.player_id,
-                    p.player_name,
-                    ps.season_year,
-                    ps.age,
+                    json_build_object(
+                        'player_id', ps.player_id,
+                        'player_name', p.player_name,
+                        'img', p.pic_url
+                    ) as player,
                     json_build_object(
                         'comp_id', ps.comp_id,
                         'comp_name', l.league_name,
@@ -177,6 +120,8 @@ class PlayerService:
                         'team_name', t.team_name,
                         'logo', t.logo_url
                     ) as team,
+                    ps.season_year,
+                    ps.age,
                     ps.ga,
                     ps.ga_pg,
                     ps.goals,
@@ -248,44 +193,51 @@ class PlayerService:
         query = f"""
         WITH all_stats AS (
             SELECT
-                -- Player info (same for all rows)
-                p.player_id,
-                p.player_name,
-                p.pic_url AS img,
-                
-                -- Array of all competitions/stats
                 json_agg(
                     json_build_object(
+                        'player', json_build_object(
+                            'player_id', p.player_id,
+                            'player_name', p.player_name,
+                            'img', p.pic_url
+                        ),
                         'comp', json_build_object(
-                            'league_id', l.league_id,
-                            'league_name', l.league_name,
-                            'logo', l.logo_url
+                            'comp_id', l.league_id,
+                            'comp_name', l.league_name,
+                            'comp_url', l.logo_url
                         ),
                         'team', json_build_object(
                             'team_id', t.team_id,
                             'team_name', t.team_name,
                             'logo', t.logo_url
                         ),
-                        'id', ps.stats_id,
                         'season_year', ps.season_year,
                         'age', ps.age,
-                        'gp', ps.gp,
-                        'goals', ps.goals,
-                        'assists', ps.assists,
                         'ga', ps.ga,
+                        'ga_pg', ps.ga_pg,
+                        'goals', ps.goals,
+                        'goals_pg', ps.goals_pg,
+                        'assists', ps.assists,
+                        'assists_pg', ps.assists_pg,
                         'penalty_goals', ps.penalty_goals,
+                        'gp', ps.gp,
                         'minutes', ps.minutes,
                         'minutes_pg', ps.minutes_pg,
-                        'goals_pg', ps.goals_pg,
+                        'cs', ps.cs,
+                        'pass_compl_pg', ps.pass_compl_pg,
+                        'passes_pg', ps.passes_pg,
+                        'errors_pg', ps.errors_pg,
                         'shots_pg', ps.shots_pg,
                         'shots_on_target_pg', ps.shots_on_target_pg,
-                        'passes_pg', ps.passes_pg,
-                        'pass_compl_pg', ps.pass_compl_pg,
+                        'sca_pg', ps.sca_pg,
+                        'gca_pg', ps.gca_pg,
                         'take_ons_pg', ps.take_ons_pg,
                         'take_ons_won_pg', ps.take_ons_won_pg,
-                        'ga_pg', ps.ga_pg,
-                        'sca_pg', ps.sca_pg
-                        
+                        'goals_concede', ps.goals_concede,
+                        'yellows', ps.yellows,
+                        'yellows2', ps.yellows2,
+                        'reds', ps.reds,
+                        'own_goals', ps.own_goals,
+                        'stats_id', ps.stats_id
                     )
                 ) AS stats_array
             FROM player_stats ps
@@ -293,20 +245,14 @@ class PlayerService:
             JOIN leagues l ON ps.comp_id = l.league_id
             JOIN teams t ON ps.team_id = t.team_id
             WHERE ps.player_id = {player_id} AND ps.season_year = {season}
-            GROUP BY p.player_id, p.player_name, p.pic_url
         )
         SELECT 
             json_build_object(
                 'data', json_build_object(
-                    'player', json_build_object(
-                        'player_id', player_id,
-                        'player_name', player_name,
-                        'img', img
-                    ),
                     'stats', stats_array
                 )
             ) AS result
-        FROM all_stats;       
+        FROM all_stats;    
         """
 
         try:
@@ -321,11 +267,10 @@ class PlayerService:
             if not result or not result.get("data"):
                 raise HTTPException(
                     status_code=404,
-                    detail=f"No data found for match "
+                    detail=f"No data found for player {player_id}"
                 )
-                
-            # Parse the response according to the actual structure
-            return PlayerSeasonStatsResponse(data=result["data"])
+            
+            return result
             
         except Exception as e:
             raise HTTPException(

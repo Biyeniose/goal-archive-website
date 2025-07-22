@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from supabase import Client
 from ..dependencies import get_supabase_client
 from ..classes.team import TeamService, TeamPlayersStatsResponse
-from ..models.team import TeamInfoResponse, TeamData, TeamSquadDataResponse
+from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse
 from typing import List
 
 

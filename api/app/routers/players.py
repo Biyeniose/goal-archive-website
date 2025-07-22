@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from supabase import Client
 from ..dependencies import get_supabase_client
-from ..classes.player import PlayerService, PlayerBioInfo, PlayerStats
+from ..classes.player import PlayerService
 from ..models.player import PlayerPageDataResponse
 from app.models.response import PlayerSeasonStatsResponse
 from datetime import datetime, timedelta

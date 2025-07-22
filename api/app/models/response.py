@@ -1,22 +1,34 @@
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
 from datetime import date
-from app.models.player import Player, PlayerSeasonInfo, PlayerBasicInfo
+from app.models.player import Player, PlayerSeasonInfo, PlayerBasicInfo, PlayerStats
 from app.models.match import MatchInfo, MatchTeams, MatchEvents, Match
 from app.models.league import LeagueInfo, TeamRank
-from app.models.team import Team
+from app.models.team import Team, TeamInfo, Transfer, SquadPlayer
 
 # PLAYER RESPONSES
 # /players/:id/allstats
 class PlayerSeasonStatsData(BaseModel):
-    player: Player
-    stats: List[PlayerSeasonInfo]
-
+    #player: Player
+    stats: List[PlayerStats]
 class PlayerSeasonStatsResponse(BaseModel):
     data: PlayerSeasonStatsData
 
 # TEAM RESPONSES
+# /teams/:id/info
+class TeamData(BaseModel):
+    info: TeamInfo
+    transfers: List[Transfer]
+    matches: List[Match]
+    stats: List[PlayerStats]
+class TeamInfoResponse(BaseModel):
+    data: TeamData
 
+# /teams/:id/squads
+class SquadResponse(BaseModel):
+    squad: List[SquadPlayer]
+class TeamSquadDataResponse(BaseModel):
+    data: SquadResponse
 
 # LEAGUE RESPONSES
 # /leagues/:id/infos

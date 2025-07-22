@@ -53,13 +53,23 @@ class Comp(BaseModel):
     comp_name: str
     comp_url: Optional[str]
 
-class PlayerStats(BaseModel):
+# /players/:id/allstats - player Season Stats models
+class PlayerSeasonGADist(BaseModel):
+    opp_team: Team
+    pct: Optional[float] = None
+    goals: Optional[int] = None
+    assists: Optional[int] = None
+    ga: Optional[int] = None
+class Player(BaseModel):
     player_id: int
     player_name: str
-    season_year: int
-    age: int
+    img: Optional[str] = None
+class PlayerStats(BaseModel):
+    player: Player
     comp: Comp
     team: Team
+    season_year: int
+    age: int
     ga: Optional[int] = None
     ga_pg: Optional[float] = None
     goals: Optional[int] = None
@@ -164,18 +174,7 @@ class PlayerBasicInfo(BaseModel):
     pic_url: Optional[str] = None
     nations: Optional[PlayerNations] = None
 
-# /players/:id/allstats - player Season Stats models
-class PlayerSeasonGADist(BaseModel):
-    opp_team: Team
-    pct: Optional[float] = None
-    goals: Optional[int] = None
-    assists: Optional[int] = None
-    ga: Optional[int] = None
 
-class Player(BaseModel):
-    player_id: int
-    player_name: str
-    img: Optional[str] = None
 
 class PlayerSeasonInfo(BaseModel):
     comp: League

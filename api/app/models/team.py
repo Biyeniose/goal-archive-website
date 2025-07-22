@@ -34,28 +34,6 @@ class PlayerNations(BaseModel):
     nation1_url: Optional[str]
     nation2_url: Optional[str]
 
-class PlayerStats(BaseModel):
-    comp_id : int
-    comp_name: str
-    comp_url: Optional[str] = None
-    player_id: int
-    season_year: int
-    player_name: str
-    position: Optional[str] = None
-    age: Optional[int] = None
-    team_id: Optional[int] = None
-    team_name: Optional[str] = None
-    team_logo: Optional[str] = None
-    ga: Optional[int] = None
-    goals: Optional[int] = None
-    assists: Optional[int] = None
-    penalty_goals: Optional[int] = None
-    gp: Optional[int] = None
-    minutes: Optional[int] = None
-    nations: Optional[PlayerNations] = None
-    #nation1: Optional[PlayerNations] = None
-    #nation2: Optional[PlayerNations] = None
-    stats_id: int
 
 
 # Matches section models
@@ -112,14 +90,7 @@ class Transfer(BaseModel):
     season: str
 
     
-class TeamData(BaseModel):
-    info: TeamInfo
-    transfers: List[Transfer]
-    matches: List[Match]
-    stats: List[PlayerStats]
 
-class TeamInfoResponse(BaseModel):
-    data: TeamData
 
 
 class SquadStats(BaseModel):
@@ -149,11 +120,6 @@ class SquadPlayer(BaseModel):
     stats: SquadStats
     season_year: int
 
-class SquadResponse(BaseModel):
-    squad: List[SquadPlayer]
-
-class TeamSquadDataResponse(BaseModel):
-    data: SquadResponse
 
 ####################
 

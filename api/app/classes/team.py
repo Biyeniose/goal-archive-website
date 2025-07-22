@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from supabase import Client
 from typing import Optional
 import requests
-from ..models.team import Transfer, PlayerStats, PlayerNations, TeamInfoResponse, TeamData, TeamSquadDataResponse, TeamBasicInfo
+from ..models.team import Transfer, PlayerNations, TeamBasicInfo
 #from ..models.player import PlayerBasicInfo
 
 global_year = 2024
@@ -188,7 +188,7 @@ class TeamService:
                 )
                 
             # Parse the response according to the actual structure
-            return TeamSquadDataResponse(data=result["data"])
+            return result
             
         except Exception as e:
             raise HTTPException(
@@ -197,7 +197,7 @@ class TeamService:
             )
 
 
-    def get_team_info(self, team_id: str) -> TeamInfoResponse:
+    def get_team_info(self, team_id: str):
         query = f"""
         WITH team_info AS (
             SELECT 
@@ -391,7 +391,7 @@ class TeamService:
                     detail=f"No team data found"
                 )
                 
-            return TeamInfoResponse(data=response_data)
+            return result
 
         except Exception as e:
             raise HTTPException(
