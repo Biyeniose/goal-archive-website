@@ -54,6 +54,9 @@ class SquadResponse(BaseModel):
 class TeamSquadDataResponse(BaseModel):
     data: SquadResponse
 
+"""
+end
+"""
 # LEAGUE RESPONSES
 # /leagues/:id/infos
 class LeagueData(BaseModel):

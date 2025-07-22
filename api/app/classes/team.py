@@ -6,8 +6,8 @@ from typing import Optional
 import requests
 from ..models.team import Transfer, PlayerNations, TeamBasicInfo
 #from ..models.player import PlayerBasicInfo
+from app.constants import GLOBAL_YEAR
 
-global_year = 2024
 
 # Define a Pydantic model
 class TopStats(BaseModel):
@@ -252,74 +252,157 @@ class TeamService:
             ORDER BY tr.date DESC
             LIMIT 30
         ),
-        team_matches AS (
+        played_matches AS (
             SELECT 
-                m.match_id,
-                m.comp_id,
-                l.league_name as comp_name,
-                l.logo_url as comp_url,
                 json_build_object(
-                    'team_name', ht.team_name,
-                    'team_id', m.home_id,
-                    'team_logo', ht.logo_url,
-                    'goals', m.home_goals
-                ) as home_team,
+                    'home', json_build_object(
+                        'stats', json_build_object(
+                            'goals', m.home_goals,
+                            'pen_goals', m.pen_home_goals,
+                            'ranking', NULL
+                        ),
+                        'team', json_build_object(
+                            'team_id', ht.team_id,
+                            'team_name', ht.team_name,
+                            'logo', ht.logo_url
+                        )
+                    ),
+                    'away', json_build_object(
+                        'stats', json_build_object(
+                            'goals', m.away_goals,
+                            'pen_goals', m.pen_away_goals,
+                            'ranking', NULL
+                        ),
+                        'team', json_build_object(
+                            'team_id', at.team_id,
+                            'team_name', at.team_name,
+                            'logo', at.logo_url
+                        )
+                    )
+                ) as teams,
                 json_build_object(
-                    'team_name', at.team_name,
-                    'team_id', m.away_id,
-                    'team_logo', at.logo_url,
-                    'goals', m.away_goals
-                ) as away_team,
-                json_build_object(
-                    'result', m.result,
-                    'win_team', m.win_team,
-                    'loss_team', m.loss_team,
-                    'isDraw', m."isDraw"
-                ) as result,
-                m.round,
-                m.match_date,
-                m.match_time,
-                json_build_object(
-                    'extra_time', m.extra_time,
+                    'match_id', m.match_id,
+                    'match_date', m.match_date::text,
+                    'date_time_utc', (m.match_date::text || ' ' || COALESCE(m.match_time::text, '00:00:00')),
+                    'round', m.round,
+                    'season_year', EXTRACT(YEAR FROM m.match_date)::int,
+                    'draw', m."isDraw",
+                    'et', m.extra_time,
                     'pens', m.pens,
-                    'pen_home_goals', m.pen_home_goals,
-                    'pen_away_goals', m.pen_away_goals
-                ) as details
+                    'result', m.result,
+                    'comp_id', m.comp_id,
+                    'comp', l.league_name,
+                    'comp_logo', l.logo_url
+                ) as match_info
             FROM matches m
             JOIN teams ht ON m.home_id = ht.team_id
             JOIN teams at ON m.away_id = at.team_id
             JOIN leagues l ON m.comp_id = l.league_id
-            WHERE m.home_id = '{team_id}' OR m.away_id = '{team_id}'
+            WHERE (m.home_id = '{team_id}' OR m.away_id = '{team_id}')
+            AND m.result IS NOT NULL
             ORDER BY m.match_date DESC, m.match_time DESC
-            LIMIT 5
+            LIMIT 4
+        ),
+        upcoming_matches AS (
+            SELECT 
+                json_build_object(
+                    'home', json_build_object(
+                        'stats', json_build_object(
+                            'goals', m.home_goals,
+                            'pen_goals', m.pen_home_goals,
+                            'ranking', NULL
+                        ),
+                        'team', json_build_object(
+                            'team_id', ht.team_id,
+                            'team_name', ht.team_name,
+                            'logo', ht.logo_url
+                        )
+                    ),
+                    'away', json_build_object(
+                        'stats', json_build_object(
+                            'goals', m.away_goals,
+                            'pen_goals', m.pen_away_goals,
+                            'ranking', NULL
+                        ),
+                        'team', json_build_object(
+                            'team_id', at.team_id,
+                            'team_name', at.team_name,
+                            'logo', at.logo_url
+                        )
+                    )
+                ) as teams,
+                json_build_object(
+                    'match_id', m.match_id,
+                    'match_date', m.match_date::text,
+                    'date_time_utc', (m.match_date::text || ' ' || COALESCE(m.match_time::text, '00:00:00')),
+                    'round', m.round,
+                    'season_year', EXTRACT(YEAR FROM m.match_date)::int,
+                    'draw', m."isDraw",
+                    'et', m.extra_time,
+                    'pens', m.pens,
+                    'result', m.result,
+                    'comp_id', m.comp_id,
+                    'comp', l.league_name,
+                    'comp_logo', l.logo_url
+                ) as match_info
+            FROM matches m
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            JOIN leagues l ON m.comp_id = l.league_id
+            WHERE (m.home_id = '{team_id}' OR m.away_id = '{team_id}')
+            AND m.result IS NULL
+            ORDER BY m.match_date ASC, m.match_time ASC
+            LIMIT 4
+        ),
+        team_matches AS (
+            SELECT teams, match_info FROM played_matches
+            UNION ALL
+            SELECT teams, match_info FROM upcoming_matches
         ),
         team_stats AS (
             SELECT
-                ps.comp_id,
-                l.league_name as comp_name,
-                l.logo_url as comp_url,
-                ps.player_id,
+                json_build_object(
+                    'player_id', p.player_id,
+                    'player_name', p.player_name,
+                    'img', NULL
+                ) as player,
+                json_build_object(
+                    'comp_id', ps.comp_id,
+                    'comp_name', l.league_name,
+                    'comp_url', l.logo_url
+                ) as comp,
+                json_build_object(
+                    'team_id', t.team_id,
+                    'team_name', t.team_name,
+                    'logo', t.logo_url
+                ) as team,
                 ps.season_year,
-                p.player_name,
-                p.position,
                 p.age,
-                ps.team_id,
-                t.team_name,
-                t.logo_url as team_logo,
                 ps.ga,
+                CASE WHEN ps.gp > 0 THEN ROUND((ps.ga::decimal / ps.gp), 2) ELSE NULL END as ga_pg,
                 ps.goals,
+                CASE WHEN ps.gp > 0 THEN ROUND((ps.goals::decimal / ps.gp), 2) ELSE NULL END as goals_pg,
                 ps.assists,
+                CASE WHEN ps.gp > 0 THEN ROUND((ps.assists::decimal / ps.gp), 2) ELSE NULL END as assists_pg,
                 ps.penalty_goals,
                 ps.gp,
                 ps.minutes,
-                json_build_object(
-                    'nation1_id', p.nation1_id,
-                    'nation2_id', p.nation2_id,
-                    'nation1', p.nation1,
-                    'nation2', p.nation2,
-                    'nation1_url', tn1.logo_url,
-                    'nation2_url', tn2.logo_url
-                ) as nations,
+                CASE WHEN ps.gp > 0 THEN ROUND((ps.minutes::decimal / ps.gp), 2) ELSE NULL END as minutes_pg,
+                NULL as cs,
+                NULL as pass_compl_pg,
+                NULL as passes_pg,
+                NULL as errors_pg,
+                NULL as shots_pg,
+                NULL as shots_on_target_pg,
+                NULL as sca_pg,
+                NULL as gca_pg,
+                NULL as take_ons_pg,
+                NULL as take_ons_won_pg,
+                NULL as goals_concede,
+                NULL as yellows,
+                NULL as yellows2,
+                NULL as reds,
+                NULL as own_goals,
                 ps.stats_id
             FROM player_stats ps
             JOIN players p ON ps.player_id = p.player_id
@@ -327,7 +410,7 @@ class TeamService:
             JOIN leagues l ON ps.comp_id = l.league_id
             LEFT JOIN teams tn1 ON p.nation1_id = tn1.team_id
             LEFT JOIN teams tn2 ON p.nation2_id = tn2.team_id
-            WHERE ps.team_id = '{team_id}' AND ps.comp_id = 9999 AND ps.season_year = {global_year}
+            WHERE ps.team_id = '{team_id}' AND ps.comp_id = 9999 AND ps.season_year = {GLOBAL_YEAR}
             ORDER BY ps.ga DESC
         )
         SELECT json_build_object(
@@ -347,27 +430,44 @@ class TeamService:
                         'season', tt.season
                     )
                 ), '[]'::json) FROM team_transfers tt),
-                'matches', (SELECT coalesce(json_agg(row_to_json(team_matches)), '[]'::json) FROM team_matches),
+                'matches', (SELECT coalesce(json_agg(
+                    json_build_object(
+                        'teams', tm.teams,
+                        'match_info', tm.match_info
+                    )
+                ), '[]'::json) FROM team_matches tm),
                 'stats', (SELECT coalesce(json_agg(
                     json_build_object(
-                        'comp_id', ts.comp_id,
-                        'comp_name', ts.comp_name,
-                        'comp_url', ts.comp_url,
-                        'player_id', ts.player_id,
+                        'player', ts.player,
+                        'comp', ts.comp,
+                        'team', ts.team,
                         'season_year', ts.season_year,
-                        'player_name', ts.player_name,
-                        'position', ts.position,
                         'age', ts.age,
-                        'team_id', ts.team_id,
-                        'team_name', ts.team_name,
-                        'team_logo', ts.team_logo,
                         'ga', ts.ga,
+                        'ga_pg', ts.ga_pg,
                         'goals', ts.goals,
+                        'goals_pg', ts.goals_pg,
                         'assists', ts.assists,
+                        'assists_pg', ts.assists_pg,
                         'penalty_goals', ts.penalty_goals,
                         'gp', ts.gp,
                         'minutes', ts.minutes,
-                        'nations', ts.nations,
+                        'minutes_pg', ts.minutes_pg,
+                        'cs', ts.cs,
+                        'pass_compl_pg', ts.pass_compl_pg,
+                        'passes_pg', ts.passes_pg,
+                        'errors_pg', ts.errors_pg,
+                        'shots_pg', ts.shots_pg,
+                        'shots_on_target_pg', ts.shots_on_target_pg,
+                        'sca_pg', ts.sca_pg,
+                        'gca_pg', ts.gca_pg,
+                        'take_ons_pg', ts.take_ons_pg,
+                        'take_ons_won_pg', ts.take_ons_won_pg,
+                        'goals_concede', ts.goals_concede,
+                        'yellows', ts.yellows,
+                        'yellows2', ts.yellows2,
+                        'reds', ts.reds,
+                        'own_goals', ts.own_goals,
                         'stats_id', ts.stats_id
                     )
                 ), '[]'::json) FROM team_stats ts)

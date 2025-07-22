@@ -14,7 +14,7 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-
+# team page route
 @router.get("/{team_id}/infos", response_model=TeamInfoResponse)
 async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)):
     try:
@@ -29,28 +29,7 @@ async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)
         raise HTTPException(status_code=500, detail=str(e))
     
 
-# GET team squad per year 
-@router.get("/{team_id}/squad", response_model=TeamSquadDataResponse)
-async def get_team(
-    team_id: str, 
-    season: int = Query(2024, description="year"),  
-    supabase: Client = Depends(get_supabase_client)
-):
-    try:
-        service = TeamService(supabase)
-        squad_data = service.get_team_squads_per_year(team_id=team_id, season=season)
-        
-        if not squad_data.data.squad:  # Check if squad list is empty
-            raise HTTPException(
-                status_code=404,
-                detail=f"Team {team_id} has no squad data for season {season}"
-            )
-        
-        return squad_data
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# GET team squad per year (maybe include only people that in the subs)
 
 
 # GET all matches in a comp in a year

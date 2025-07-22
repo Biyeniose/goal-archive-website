@@ -2,16 +2,6 @@
 from typing import List, Dict, Optional
 from pydantic import BaseModel
 
-# Helper models
-class NationInfo(BaseModel):
-    nation_id: Optional[int]
-    nation_url: Optional[str]
-
-class LeagueInfo(BaseModel):
-    league_id: int
-    league_name: str
-    logo_url: Optional[str]
-
 # Info section models
 class TeamInfo(BaseModel):
     team_id: int
