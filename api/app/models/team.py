@@ -79,10 +79,6 @@ class Transfer(BaseModel):
     date: Optional[str]
     season: str
 
-    
-
-
-
 class SquadStats(BaseModel):
     ga: Optional[int]
     goals: Optional[int]

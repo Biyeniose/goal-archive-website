@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from supabase import Client
+from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.team import TeamService, TeamPlayersStatsResponse
-from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse, LeagueMatchesResponse
+from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse, LeagueMatchesResponse, TeamTransfersResponse
 from app.constants import GLOBAL_YEAR
 from typing import List
 
@@ -42,7 +43,15 @@ def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year
     return stats
 
 # GET all transfers in a year and total incoming/outgoing fees
+@router.get("/{team_id}/transfers", response_model=TeamTransfersResponse)
+def get_transfers(team_id: int, start_date: date = Query("2024-05-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-08-01", description="End date in YYYY-MM-DD format"),supabase: Client = Depends(get_supabase_client)):
+    service = TeamService(supabase)
+    stats = service.get_transfers_by_date(team_id=team_id, start_date=start_date, end_date=end_date)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
 
+# GET ALL comp finishes by year (league ranks) and their last game in the comp
 
 
 

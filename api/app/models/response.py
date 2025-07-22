@@ -54,6 +54,18 @@ class SquadResponse(BaseModel):
 class TeamSquadDataResponse(BaseModel):
     data: SquadResponse
 
+# /teams/:id/transfers?start_date=2024
+class TeamTransferSum(BaseModel):
+    players_in: int
+    players_out: int
+    total_fees_in: float
+    total_fees_out: float
+    net_fees: float
+class TeamTransfersData(BaseModel):
+    transfers: List[Transfer]
+    sum: TeamTransferSum
+class TeamTransfersResponse(BaseModel):
+    data: TeamTransfersData
 """
 end
 """
