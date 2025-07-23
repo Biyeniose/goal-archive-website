@@ -86,6 +86,21 @@ class TeamSeasonResponse(BaseModel):
 end
 """
 # LEAGUE RESPONSES
+# /leagues/top_comps
+class WinTeam(BaseModel):
+    team: Team
+    rank: Optional[int] = None
+    round: Optional[str] = None
+    points: Optional[int] = None
+    season: int
+class TopCompsWinners(BaseModel):
+    comp: LeagueInfo
+    win_teams: List[WinTeam]
+class TopCompsWinnersData(BaseModel):
+    stats: List[TopCompsWinners]
+class TopCompsWinnersResponse(BaseModel):
+    data: TopCompsWinnersData
+
 # /leagues/:id/infos
 class LeagueData(BaseModel):
     info: LeagueInfo
@@ -127,7 +142,6 @@ class LeagueStatsData(BaseModel):
     reds: Optional[int] = None
     own_goals: Optional[int] = None
     stats_id: int
-
 class LeagueStatsContainer(BaseModel):
     stats: List[LeagueStatsData]
 class LeagueStatsResponse(BaseModel):
@@ -136,23 +150,21 @@ class LeagueStatsResponse(BaseModel):
 # /leagues/:id/matches?season
 class LeagueMatches(BaseModel):
     matches: List[Match]
-
 class LeagueMatchesResponse(BaseModel):
     data: LeagueMatches
 
 # /leagues/:id/ranks?season
 class LeagueRanks(BaseModel):
     ranks: List[TeamRank]
-
 class LeagueRanksResponse(BaseModel):
     data: LeagueRanks
 
-# /leagues/:id/ranks?season
+# /leagues/:id/form?season
 class LeagueFormByYear(BaseModel):
     form: List[TeamRank]
 class LeagueFormResponse(BaseModel):
     data: LeagueFormByYear
-# /leagues/:id/form?season
+ 
 """
 end
 """

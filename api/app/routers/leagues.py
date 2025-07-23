@@ -3,8 +3,8 @@ from supabase import Client
 from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.league import LeagueService
-from ..models.league import TopLeaguesResponse, TeamRank
-from app.models.response import LeagueDataResponse, LeagueStatsResponse, LeagueMatchesResponse, LeagueRanksResponse, LeagueFormResponse
+from ..models.league import TeamRank
+from app.models.response import LeagueDataResponse, LeagueStatsResponse, LeagueMatchesResponse, LeagueRanksResponse, LeagueFormResponse, TopCompsWinnersResponse
 from app.constants import GLOBAL_YEAR
 from typing import List
 
@@ -56,16 +56,6 @@ def get_alltime_top_stats(league_id: int, team_id: int, age: int = Query(50, des
 
     return stats
 
-# GET rankings of top teams
-@router.get("/top_ranks", response_model=TopLeaguesResponse)
-def get_top_league_ranks(season: int = Query(2024, description="year"), supabase: Client = Depends(get_supabase_client)):
-    service = LeagueService(supabase)
-    stats = service.top_leagues_rankings(season=season)
-
-    if not stats:
-        raise HTTPException(status_code=404, detail="Stats not found")
-
-    return stats
 
 # GET all matches in a league in a season
 @router.get("/{league_id}/matches", response_model=LeagueMatchesResponse)
@@ -110,4 +100,12 @@ def get_form_by_dates(league_id: int, start_date: date = Query("2025-03-01", des
         raise HTTPException(status_code=404, detail="Stats not found")
     return stats
 
+# get lists of past winners of comps
+@router.get("/winners", response_model=TopCompsWinnersResponse)
+def get_recent_winners(supabase: Client = Depends(get_supabase_client)):
+    service = LeagueService(supabase)
+    stats = service.get_recent_winners()
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
 

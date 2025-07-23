@@ -23,25 +23,14 @@ class TeamRank(BaseModel):
     goals_f: int
     goals_a: int
 
-class TopLeaguesInfo(BaseModel):
-    comp_id: int
-    league_name: str
-    country_id: Optional[int]
-    country_url: Optional[str]
-    type: Optional[str]
-    ranks: List[TeamRank]
-
-
-class TopLeaguesResponse(BaseModel):
-    data: List[TopLeaguesInfo]
-
 class LeagueInfo(BaseModel):
     comp_id: int
     league_name: str
-    country_id: int
-    league_logo: Optional[str]
-    type: str
-    country_url: str
+    country_id: Optional[int] = None
+    country: Optional[str] = None
+    league_logo: Optional[str] = None
+    type: Optional[str] = None
+    country_url: Optional[str] = None
 
 class Comp(BaseModel):
     comp_id: int
@@ -49,4 +38,3 @@ class Comp(BaseModel):
     comp_url: Optional[str]
 
 
-    

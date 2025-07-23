@@ -39,6 +39,7 @@ class LeagueService:
                                     'league_name', l.league_name,
                                     'league_logo', l.logo_url,
                                     'country_id', l.country_id,
+                                    'country', l.country,
                                     'type', l.type,
                                     'country_url', t.logo_url
                                 ),
@@ -996,6 +997,112 @@ class LeagueService:
                 raise HTTPException(
                     status_code=404,
                     detail=f"No data found for league {league_id}"
+                )
+            # Parse the response according to the actual structure
+            #return LeagueStatsResponse(data=result["data"])
+            return result
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+
+    # /leagues/{league_id}/form-recent 
+    def get_recent_winners(self):
+        query = f"""
+        WITH target_comps AS (
+            SELECT unnest(ARRAY[1,2,3,4,5,7,8,10,11,9900,9901,98373,7292,25,20,2839,201,482,12,301,101,202]) AS comp_id
+        ),
+        comp_winners AS (
+            SELECT 
+                l.league_id as comp_id,
+                l.league_name,
+                l.type,
+                l.country_id,
+                l.country,
+                l.logo_url as league_logo,
+                c.logo_url as country_url,
+                c.team_name as country_name,
+                lr.season_year as season,
+                lr.team_id,
+                t.team_name,
+                t.logo_url as team_logo,
+                lr.rank,
+                lr.round,
+                lr.points
+            FROM league_ranks lr
+            JOIN leagues l ON lr.comp_id = l.league_id
+            JOIN teams t ON lr.team_id = t.team_id
+            LEFT JOIN teams c ON l.country_id = c.team_id  -- Changed to LEFT JOIN for optional country
+            JOIN target_comps tc ON lr.comp_id = tc.comp_id
+            WHERE lr.season_year IN (2023, 2024)
+            AND (lr.rank = 1 OR lr.round = 'Winners')
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'stats', COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'comp', json_build_object(
+                                'comp_id', cw.comp_id,
+                                'league_name', cw.league_name,
+                                'country_id', cw.country_id,
+                                'country', COALESCE(cw.country_name, NULL),
+                                'league_logo', COALESCE(cw.league_logo, NULL),
+                                'type', COALESCE(cw.type, NULL),
+                                'country_url', COALESCE(cw.country_url, NULL)
+                            ),
+                            'win_teams', (
+                                SELECT COALESCE(json_agg(
+                                    json_build_object(
+                                        'team', json_build_object(
+                                            'team_id', w.team_id,
+                                            'team_name', w.team_name,
+                                            'logo', COALESCE(w.team_logo, NULL)
+                                        ),
+                                        'rank', w.rank,
+                                        'round', w.round,
+                                        'points', w.points,
+                                        'season', w.season
+                                    )
+                                    ORDER BY w.season DESC
+                                ), '[]'::json)
+                                FROM comp_winners w
+                                WHERE w.comp_id = cw.comp_id
+                            )
+                        )
+                        ORDER BY cw.league_name  -- Order competitions alphabetically
+                    ) FROM (
+                        SELECT DISTINCT 
+                            comp_id, 
+                            league_name, 
+                            type, 
+                            country_id, 
+                            country_name,
+                            league_logo, 
+                            country_url 
+                        FROM comp_winners
+                    ) cw),
+                    '[]'::json
+                )
+            )
+        ) as result
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response text: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for recent winners"
                 )
             # Parse the response according to the actual structure
             #return LeagueStatsResponse(data=result["data"])
