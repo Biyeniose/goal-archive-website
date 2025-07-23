@@ -4,7 +4,7 @@ from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.player import PlayerService
 from ..models.player import PlayerPageDataResponse
-from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse, PlayerRecentGAResponse
+from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse, PlayerRecentGAResponse, PlayerGADistResponse
 from datetime import datetime, timedelta
 import pytz, requests, random
 from app.constants import GLOBAL_YEAR
@@ -44,7 +44,16 @@ async def get_player_page_data(player_id: int, supabase: Client = Depends(get_su
         raise HTTPException(status_code=500, detail=str(e))
 
 # GET breakdown (teams+pens) of G/A for a season or by date range
-
+@router.get("/{player_id}/goal-dist", response_model=PlayerGADistResponse)
+async def get_player_goal_dist(player_id: int, season: int = Query(GLOBAL_YEAR, description="Season year"), supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_player_goal_distribution(player_id=player_id, season=season)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 # GET list of all the games per season they were in xi or bench + match stats
 @router.get("/{player_id}/matches", response_model=PlayerMatchesResponse)
 async def get_player_match_statistics(player_id: int, season: int = Query(GLOBAL_YEAR, description="Season year"), supabase: Client = Depends(get_supabase_client)):

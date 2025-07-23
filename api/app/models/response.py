@@ -37,6 +37,40 @@ class PlayerRecentGAData(BaseModel):
 class PlayerRecentGAResponse(BaseModel):
     data: PlayerRecentGAData
 
+# /players/:id/goal-dist?season
+class TotalGA(BaseModel):
+    goals: int
+    assists: int
+    ga: int
+    pens: Optional[int] = None
+class Pens(BaseModel):
+    pen_pct: Optional[float] = None
+    pens_scored: Optional[int] = None
+class StatsDist(BaseModel):
+    ga_against_pct: Optional[float] = None
+    ga_against: Optional[int] = None
+    goals_against: Optional[int] = None
+    goals_against_pct: Optional[float] = None
+    assists_against: Optional[int] = None
+    assists_against_pct: Optional[float] = None
+class TeamDist(BaseModel):
+    team: Team
+    stats: StatsDist
+class GoalDist(BaseModel):
+    teams: TeamDist
+class Comp2(BaseModel):
+    comp_id: int
+    comp_name: str
+    comp_url: Optional[str]
+    season_year: int
+
+class PlayerGADistData(BaseModel):
+    info: Comp2
+    total: TotalGA
+    goal_dist: List[GoalDist]
+    pens: Pens
+class PlayerGADistResponse(BaseModel):
+    data: PlayerGADistData
 
 # TEAM RESPONSES
 # /teams/:id/info
