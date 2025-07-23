@@ -126,6 +126,180 @@ class StatsService:
             "Content-Type": "application/json"
         }
 
+    def get_teams_h2h(self, team1_id: int, team2_id: int, num_matches: int, start_date: str, end_date: str):
+        query = f"""
+        WITH team_matches AS (
+            SELECT 
+                m.match_id,
+                m.match_date as match_date,
+                m.date_time_utc,
+                m.round,
+                m.season_year,
+                m."isDraw" as draw,
+                m.extra_time,
+                m.pens,
+                m.result,
+                m.comp_id,
+                l.league_name as comp,
+                l.logo_url as comp_logo,
+                m.home_id,
+                m.away_id,
+                m.home_goals,
+                m.away_goals,
+                m.win_team,
+                m.loss_team,
+                home_team.team_name as home_team_name,
+                home_team.logo_url as home_team_logo,
+                away_team.team_name as away_team_name,
+                away_team.logo_url as away_team_logo
+            FROM matches m
+            JOIN leagues l ON m.comp_id = l.league_id
+            JOIN teams home_team ON m.home_id = home_team.team_id
+            JOIN teams away_team ON m.away_id = away_team.team_id
+            WHERE 
+                ((m.home_id = {team1_id} AND m.away_id = {team2_id}) OR 
+                (m.home_id = {team2_id} AND m.away_id = {team1_id}))
+                AND m."isPlayed" = true
+                AND m.match_date BETWEEN '{start_date}' AND '{end_date}'
+            ORDER BY m.match_date DESC
+            LIMIT {num_matches}
+        ),
+        match_stats AS (
+            SELECT
+                match_id,
+                home_id as team_id,
+                home_goals as goals_f,
+                away_goals as goals_a,
+                CASE 
+                    WHEN win_team = home_id THEN 'win'
+                    WHEN loss_team = home_id THEN 'loss'
+                    ELSE 'draw'
+                END as outcome
+            FROM team_matches
+            UNION ALL
+            SELECT
+                match_id,
+                away_id as team_id,
+                away_goals as goals_f,
+                home_goals as goals_a,
+                CASE 
+                    WHEN win_team = away_id THEN 'win'
+                    WHEN loss_team = away_id THEN 'loss'
+                    ELSE 'draw'
+                END as outcome
+            FROM team_matches
+        ),
+        team_records AS (
+            SELECT
+                t.team_id,
+                t.team_name,
+                t.logo_url as logo,
+                COUNT(*) as gp,
+                SUM(CASE WHEN ms.outcome = 'win' THEN 1 ELSE 0 END) as wins,
+                ROUND(SUM(CASE WHEN ms.outcome = 'win' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) as win_pct,
+                SUM(CASE WHEN ms.outcome = 'loss' THEN 1 ELSE 0 END) as losses,
+                SUM(CASE WHEN ms.outcome = 'draw' THEN 1 ELSE 0 END) as draws,
+                SUM(ms.goals_f) as goals_f,
+                SUM(ms.goals_a) as goals_a
+            FROM match_stats ms
+            JOIN teams t ON ms.team_id = t.team_id
+            WHERE t.team_id IN ({team1_id}, {team2_id})
+            GROUP BY t.team_id, t.team_name, t.logo_url
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'matches', COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'teams', json_build_object(
+                                'home', json_build_object(
+                                    'stats', json_build_object(
+                                        'goals', tm.home_goals,
+                                        'pen_goals', NULL,
+                                        'ranking', NULL
+                                    ),
+                                    'team', json_build_object(
+                                        'team_id', tm.home_id,
+                                        'team_name', tm.home_team_name,
+                                        'logo', tm.home_team_logo
+                                    )
+                                ),
+                                'away', json_build_object(
+                                    'stats', json_build_object(
+                                        'goals', tm.away_goals,
+                                        'pen_goals', NULL,
+                                        'ranking', NULL
+                                    ),
+                                    'team', json_build_object(
+                                        'team_id', tm.away_id,
+                                        'team_name', tm.away_team_name,
+                                        'logo', tm.away_team_logo
+                                    )
+                                )
+                            ),
+                            'match_info', json_build_object(
+                                'match_id', tm.match_id,
+                                'match_date', tm.match_date,
+                                'date_time_utc', tm.date_time_utc,
+                                'round', tm.round,
+                                'season_year', tm.season_year,
+                                'draw', tm.draw,
+                                'et', tm.extra_time,
+                                'pens', tm.pens,
+                                'result', tm.result,
+                                'comp_id', tm.comp_id,
+                                'comp', tm.comp,
+                                'comp_logo', tm.comp_logo
+                            )
+                        )
+                    ) FROM team_matches tm),
+                    '[]'::json
+                ),
+                'record', COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'team', json_build_object(
+                                'team_id', tr.team_id,
+                                'team_name', tr.team_name,
+                                'logo', tr.logo
+                            ),
+                            'gp', tr.gp,
+                            'wins', tr.wins,
+                            'win_pct', tr.win_pct,
+                            'losses', tr.losses,
+                            'draws', tr.draws,
+                            'goals_f', tr.goals_f,
+                            'goals_a', tr.goals_a
+                        )
+                    ) FROM team_records tr),
+                    '[]'::json
+                )
+            )
+        ) as result;
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(result)
+            response_data = result.get('data')
+            if not response_data:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No team data found"
+                )
+            return result
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
 
     def get_teams_recent_matches(self, comp_id: int, season_year: int) -> List[TeamRecentMatches]:
         try:

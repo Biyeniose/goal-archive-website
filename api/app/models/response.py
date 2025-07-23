@@ -106,7 +106,7 @@ class LeagueWinnersData(BaseModel):
     stats: TopCompsWinners
 class LeagueWinnersResponse(BaseModel):
     data: LeagueWinnersData
-    
+
 # /leagues/:id/infos
 class LeagueData(BaseModel):
     info: LeagueInfo
@@ -184,6 +184,22 @@ class MatchInfoData(BaseModel):
 
 class MatchInfoResponse(BaseModel):
     data: MatchInfoData
+
+# /matches/h2h/?team1?team2
+class TeamRecord(BaseModel):
+    team: Team
+    gp: int
+    wins: int
+    win_pct: float
+    losses: int
+    draws: int
+    goals_f: int
+    goals_a: int
+class H2HData(BaseModel):
+    matches: List[Match]
+    record: List[TeamRecord]
+class H2HResponse(BaseModel):
+    data: H2HData
 
 # NICHE STATS RESPONSES
 
