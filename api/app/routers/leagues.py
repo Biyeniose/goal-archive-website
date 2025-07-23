@@ -4,7 +4,7 @@ from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.league import LeagueService
 from ..models.league import TeamRank
-from app.models.response import LeagueDataResponse, LeagueStatsResponse, LeagueMatchesResponse, LeagueRanksResponse, LeagueFormResponse, TopCompsWinnersResponse
+from app.models.response import LeagueDataResponse, LeagueStatsResponse, LeagueMatchesResponse, LeagueRanksResponse, LeagueFormResponse, TopCompsWinnersResponse, LeagueWinnersResponse
 from app.constants import GLOBAL_YEAR
 from typing import List
 
@@ -109,3 +109,11 @@ def get_recent_winners(supabase: Client = Depends(get_supabase_client)):
         raise HTTPException(status_code=404, detail="Stats not found")
     return stats
 
+# get lists of past winners of a certain comp
+@router.get("/{league_id}/last_winners", response_model=LeagueWinnersResponse)
+def get_recent_winners(league_id: int, supabase: Client = Depends(get_supabase_client)):
+    service = LeagueService(supabase)
+    stats = service.get_league_winners(league_id=league_id)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats

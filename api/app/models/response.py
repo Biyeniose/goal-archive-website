@@ -86,7 +86,7 @@ class TeamSeasonResponse(BaseModel):
 end
 """
 # LEAGUE RESPONSES
-# /leagues/top_comps
+# /leagues/winners
 class WinTeam(BaseModel):
     team: Team
     rank: Optional[int] = None
@@ -101,6 +101,12 @@ class TopCompsWinnersData(BaseModel):
 class TopCompsWinnersResponse(BaseModel):
     data: TopCompsWinnersData
 
+# /leagues/:id/last_winners
+class LeagueWinnersData(BaseModel):
+    stats: TopCompsWinners
+class LeagueWinnersResponse(BaseModel):
+    data: LeagueWinnersData
+    
 # /leagues/:id/infos
 class LeagueData(BaseModel):
     info: LeagueInfo

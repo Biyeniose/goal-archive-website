@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from datetime import date
+from datetime import date, datetime
 #from typing import List
 from pydantic import BaseModel
 from supabase import Client
@@ -9,6 +9,9 @@ from typing import Optional
 from app.models.response import LeagueDataResponse, LeagueStatsResponse
 from app.models.player import PlayerBasicInfo
 from app.models.team import Team
+from app.models.response import WinTeam, TopCompsWinners, LeagueWinnersResponse, LeagueWinnersData
+from app.models.league import LeagueInfo
+
 
 class LeagueService:
     def __init__(self, supabase_client: Client):
@@ -1009,7 +1012,7 @@ class LeagueService:
             )
 
 
-    # /leagues/{league_id}/form-recent 
+    # /leagues/winners
     def get_recent_winners(self):
         query = f"""
         WITH target_comps AS (
@@ -1113,4 +1116,155 @@ class LeagueService:
                 status_code=500,
                 detail=f"Unexpected error: {str(e)}"
             )
+
+    # /leagues/{league_id}/last_winners 
+    def get_league_winners(self, league_id: int):
+        try:
+            # First get league info
+            league = self.supabase.table('leagues').select('*').eq('league_id', league_id).single().execute()
+            
+            # Get country info if exists
+            country = None
+            if league.data.get('country_id'):
+                country = self.supabase.table('teams').select('*').eq('team_id', league.data['country_id']).single().execute()
+            
+            # Define the specific seasons we want
+            target_seasons = [2024, 2023, 2022, 2021, 2020, 2019]
+            
+            # Get winners for the specific seasons
+            winners = self.supabase.table('league_ranks') \
+                .select('*') \
+                .eq('comp_id', league_id) \
+                .in_('season_year', target_seasons) \
+                .or_('rank.eq.1,round.eq.Winners') \
+                .execute()
+            
+            # Get team details for each winner
+            win_teams = []
+            for winner in winners.data:
+                team = self.supabase.table('teams').select('*').eq('team_id', winner['team_id']).single().execute()
+                
+                win_teams.append(WinTeam(
+                    team=Team(
+                        team_id=team.data['team_id'],
+                        team_name=team.data['team_name'],
+                        logo=team.data.get('logo_url')
+                    ),
+                    rank=winner.get('rank'),
+                    round=winner.get('round'),
+                    points=winner.get('points'),
+                    season=winner['season_year']
+                ))
+            
+            # Sort by season descending
+            win_teams.sort(key=lambda x: x.season, reverse=True)
+            
+            # Build the response
+            comp = LeagueInfo(
+                comp_id=league.data['league_id'],
+                league_name=league.data['league_name'],
+                country_id=league.data.get('country_id'),
+                country=country.data['team_name'] if country else None,
+                league_logo=league.data.get('logo_url'),
+                type=league.data.get('type'),
+                country_url=country.data.get('logo_url') if country else None
+            )
+            
+            stats = TopCompsWinners(
+                comp=comp,
+                win_teams=win_teams
+            )
+            
+            return LeagueWinnersResponse(
+                data=LeagueWinnersData(stats=stats)
+            )
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+        
+    def get_league_winners_by_years(self, league_id: int, start_year: int, end_year: int):
+        try:
+            # Validate year inputs
+            if start_year > end_year:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Start year must be less than or equal to end year"
+                )
+            
+            # First get league info
+            league = self.supabase.table('leagues').select('*').eq('league_id', league_id).single().execute()
+            
+            # Get country info if exists
+            country = None
+            if league.data.get('country_id'):
+                country = self.supabase.table('teams').select('*').eq('team_id', league.data['country_id']).single().execute()
+            
+            # Generate the range of seasons we want (inclusive)
+            target_seasons = list(range(start_year, end_year + 1))
+            
+            # Get winners for the specified seasons
+            winners = self.supabase.table('league_ranks') \
+                .select('*') \
+                .eq('comp_id', league_id) \
+                .in_('season_year', target_seasons) \
+                .or_('rank.eq.1,round.eq.Winners') \
+                .execute()
+            
+            # Get team details for each winner
+            win_teams = []
+            for winner in winners.data:
+                team = self.supabase.table('teams').select('*').eq('team_id', winner['team_id']).single().execute()
+                
+                win_teams.append(WinTeam(
+                    team=Team(
+                        team_id=team.data['team_id'],
+                        team_name=team.data['team_name'],
+                        logo=team.data.get('logo_url')
+                    ),
+                    rank=winner.get('rank'),
+                    round=winner.get('round'),
+                    points=winner.get('points'),
+                    season=winner['season_year']
+                ))
+            
+            # Sort by season descending
+            win_teams.sort(key=lambda x: x.season, reverse=True)
+            
+            # Build the response
+            comp = LeagueInfo(
+                comp_id=league.data['league_id'],
+                league_name=league.data['league_name'],
+                country_id=league.data.get('country_id'),
+                country=country.data['team_name'] if country else None,
+                league_logo=league.data.get('logo_url'),
+                type=league.data.get('type'),
+                country_url=country.data.get('logo_url') if country else None
+            )
+            
+            stats = TopCompsWinners(
+                comp=comp,
+                win_teams=win_teams
+            )
+            
+            return LeagueWinnersResponse(
+                data=LeagueWinnersData(stats=stats)
+            )
+            
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+
+
+
+
+
+
 
