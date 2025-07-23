@@ -42,3 +42,11 @@ class LeagueInfo(BaseModel):
     league_logo: Optional[str]
     type: str
     country_url: str
+
+class Comp(BaseModel):
+    comp_id: int
+    comp_name: str
+    comp_url: Optional[str]
+
+
+    

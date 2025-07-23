@@ -3,7 +3,7 @@ from typing import List, Optional
 from datetime import date
 from app.models.player import Player, PlayerBasicInfo, PlayerStats
 from app.models.match import MatchInfo, MatchTeams, MatchEvents, Match, PlayerMatchStats, MatchTeamsBasic, PlayerMatchStatsDiv, BasicStats
-from app.models.league import LeagueInfo, TeamRank
+from app.models.league import LeagueInfo, TeamRank, Comp
 from app.models.team import Team, TeamInfo, Transfer, SquadPlayer
 
 
@@ -66,6 +66,22 @@ class TeamTransfersData(BaseModel):
     sum: TeamTransferSum
 class TeamTransfersResponse(BaseModel):
     data: TeamTransfersData
+# /teams/:id/allcomps?season=2024
+class TeamCompRank(BaseModel):
+    rank: Optional[int] = None
+    round: Optional[str] = None
+    points: Optional[int] = None
+    season: int
+    team_id: int
+    comp: Comp
+class TeamSeason(BaseModel):
+    ranking: TeamCompRank
+    #last_match: Match
+class TeamSeasonData(BaseModel):
+    season_comps: List[TeamSeason]
+    team: Team
+class TeamSeasonResponse(BaseModel):
+    data: TeamSeasonData
 """
 end
 """

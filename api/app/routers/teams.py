@@ -3,7 +3,7 @@ from supabase import Client
 from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.team import TeamService, TeamPlayersStatsResponse
-from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse, LeagueMatchesResponse, TeamTransfersResponse
+from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse, LeagueMatchesResponse, TeamTransfersResponse, TeamSeasonResponse
 from app.constants import GLOBAL_YEAR
 from typing import List
 
@@ -52,6 +52,12 @@ def get_transfers(team_id: int, start_date: date = Query("2024-05-01", descripti
     return stats
 
 # GET ALL comp finishes by year (league ranks) and their last game in the comp
-
+@router.get("/{team_id}/comps", response_model=TeamSeasonResponse)
+def get_all_comp_finishes(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
+    service = TeamService(supabase)
+    stats = service.get_comp_finishes_by_year(team_id=team_id, season=season)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
 
 

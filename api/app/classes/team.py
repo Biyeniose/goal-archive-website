@@ -498,7 +498,7 @@ class TeamService:
             )
         
 
-    def get_team_matches_by_year(self, team_id: str, season: int):
+    def get_team_matches_by_year(self, team_id: int, season: int):
         query = f"""
         SELECT json_build_object(
             'data', json_build_object(
@@ -717,4 +717,88 @@ class TeamService:
                 detail=f"Unexpected error: {str(e)}"
             )
         
+
+    def get_comp_finishes_by_year(self, team_id: int, season: int):
+        query = f"""
+        WITH team_comps AS (
+            SELECT 
+                lr.rank,
+                lr.round,
+                lr.season_year,
+                lr.points,
+                lr.team_id,
+                lr.comp_id,
+                l.league_name as comp_name,
+                l.logo_url as comp_logo,
+                t.team_name,
+                t.logo_url as team_logo
+            FROM league_ranks lr
+            JOIN leagues l ON lr.comp_id = l.league_id
+            JOIN teams t ON lr.team_id = t.team_id
+            WHERE lr.team_id = {team_id} AND lr.season_year = {season}
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'season_comps', COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'ranking', json_build_object(
+                                'rank', tc.rank,
+                                'round', tc.round,
+                                'points', tc.points,
+                                'season', tc.season_year,
+                                'team_id', tc.team_id,
+                                'comp', json_build_object(
+                                    'comp_id', tc.comp_id,
+                                    'comp_name', tc.comp_name,
+                                    'comp_url', tc.comp_logo
+                                )
+                            )
+                        )
+                    ) FROM team_comps tc),
+                    '[]'::json
+                ),
+                'team', (
+                    SELECT json_build_object(
+                        'team_id', tc.team_id,
+                        'team_name', tc.team_name,
+                        'logo', tc.team_logo
+                    )
+                    FROM team_comps tc
+                    LIMIT 1
+                )
+            )
+        ) as result
+        
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response status: {response.status_code}")
+            #print(f"Supabase raw response text: {response.text}")
+            # The response structure is {"data": {...}} not a list with result[0]
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for team {team_id}"
+                )
+            # Parse the response according to the actual structure
+            return result
+            
+        except requests.exceptions.HTTPError as http_err:
+            error_detail = response.text if hasattr(response, 'text') else str(http_err)
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Supabase error: {error_detail}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
 

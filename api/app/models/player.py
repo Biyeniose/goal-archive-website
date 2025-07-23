@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from datetime import date
 from typing import ClassVar
 from ..models.team import Team
-from app.models.league import League
+from app.models.league import League, Comp
 import importlib
 #if TYPE_CHECKING:
  #  from ..models.league import League
@@ -33,10 +33,6 @@ class MatchTeam(BaseModel):
     team_logo: str
     goals: Optional[int]
 
-class Comp(BaseModel):
-    comp_id: int
-    comp_name: str
-    comp_url: Optional[str]
 
 # /players/:id/allstats - player Season Stats models
 class PlayerSeasonGADist(BaseModel):
