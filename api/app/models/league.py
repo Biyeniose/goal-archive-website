@@ -12,16 +12,16 @@ class League(BaseModel):
 
 class TeamRank(BaseModel):
     team: Team
-    rank: str
-    info: Optional[str]
-    points: int
-    gp: int
-    gd: int
-    wins: int
-    losses: int
-    draws: int
-    goals_f: int
-    goals_a: int
+    rank: Optional[str]= None
+    info: Optional[str] = None
+    points: Optional[int] = None
+    gp: Optional[int] = None
+    gd: Optional[int] = None
+    wins: Optional[int] = None
+    losses: Optional[int] = None
+    draws: Optional[int] = None
+    goals_f: Optional[int] = None
+    goals_a: Optional[int] = None
 
 class LeagueInfo(BaseModel):
     comp_id: int

@@ -50,7 +50,7 @@ class PlayerStats(BaseModel):
     comp: Comp
     team: Team
     season_year: int
-    age: int
+    age: Optional[int] = None
     ga: Optional[int] = None
     ga_pg: Optional[float] = None
     goals: Optional[int] = None

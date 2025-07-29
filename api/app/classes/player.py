@@ -706,7 +706,7 @@ class PlayerService:
             WHERE l.player_id = {player_id}
             AND (pms.goals > 0 OR pms.assists > 0)
             ORDER BY m.match_date DESC
-            LIMIT 10
+            LIMIT 25
         ),
         match_details AS (
             SELECT 

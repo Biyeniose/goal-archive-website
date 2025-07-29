@@ -27,122 +27,182 @@ class LeagueService:
     # /leagues/:id/infos
     def get_league_info(self, comp_id: int, season: int):
         query = f"""
-            WITH league_check AS (
-                SELECT l.type 
-                FROM leagues l 
-                WHERE l.league_id = {comp_id}
-            )
+        WITH league_check AS (
+            SELECT l.type 
+            FROM leagues l 
+            WHERE l.league_id = {comp_id}
+        ),
+        past_matches AS (
             SELECT 
-                CASE WHEN (SELECT type FROM league_check) LIKE '%League%' THEN
-                    json_build_object(
-                        'data', json_agg(
-                            json_build_object(
-                                'info', json_build_object(
-                                    'comp_id', l.league_id,
-                                    'league_name', l.league_name,
-                                    'league_logo', l.logo_url,
-                                    'country_id', l.country_id,
-                                    'country', l.country,
-                                    'type', l.type,
-                                    'country_url', t.logo_url
-                                ),
-                                'ranks', (
-                                    SELECT json_agg(subq)
-                                    FROM (
-                                        SELECT 
-                                            json_build_object(
-                                                'rank', lr.rank::text,
-                                                'team', json_build_object(
-                                                    'team_id', lr.team_id,
-                                                    'team_name', t2.team_name,
-                                                    'logo', t2.logo_url
-                                                ),
-                                                'info', COALESCE(lr.info, ''),
-                                                'points', lr.points,
-                                                'gp', lr.gp,
-                                                'wins', lr.wins,
-                                                'losses', lr.losses,
-                                                'draws', lr.draws,
-                                                'goals_f', lr.goals_f,
-                                                'goals_a', lr.goals_a,
-                                                'gd', lr.gd
-                                            ) as subq
-                                        FROM league_ranks lr
-                                        JOIN teams t2 ON lr.team_id = t2.team_id
-                                        WHERE lr.comp_id = {comp_id}
-                                        AND lr.season_year = {season}
-                                        ORDER BY lr.rank::integer ASC
-                                        LIMIT 20
-                                    ) as subq
-                                ),
-                                'matches', (
-                                    SELECT json_agg(match_subq)
-                                    FROM (
-                                        SELECT 
-                                            json_build_object(
-                                                'teams', json_build_object(
-                                                    'home', json_build_object(
-                                                        'stats', json_build_object(
-                                                            'goals', COALESCE(m.home_goals, 0),
-                                                            'pen_goals', COALESCE(m.pen_home_goals, 0),
-                                                            'ranking', m.home_ranking
-                                                        ),
-                                                        'team', json_build_object(
-                                                            'team_id', m.home_id,
-                                                            'team_name', ht.team_name,
-                                                            'logo', ht.logo_url
-                                                        )
-                                                    ),
-                                                    'away', json_build_object(
-                                                        'stats', json_build_object(
-                                                            'goals', COALESCE(m.away_goals, 0),
-                                                            'pen_goals', COALESCE(m.pen_away_goals, 0),
-                                                            'ranking', m.away_ranking
-                                                        ),
-                                                        'team', json_build_object(
-                                                            'team_id', m.away_id,
-                                                            'team_name', at.team_name,
-                                                            'logo', at.logo_url
-                                                        )
-                                                    )
-                                                ),
-                                                'match_info', json_build_object(
-                                                    'match_id', m.match_id,
-                                                    'match_date', m.match_date,
-                                                    'date_time_utc', m.date_time_utc,
-                                                    'round', m.round,
-                                                    'season_year', m.season_year,
-                                                    'draw', m."isDraw",
-                                                    'et', m.extra_time,
-                                                    'pens', m.pens,
-                                                    'result', m.result,
-                                                    'comp_id', m.comp_id,
-                                                    'comp', l.league_name,
-                                                    'comp_logo', l.logo_url
-                                                )
-                                            ) as match_subq
-                                        FROM matches m
-                                        JOIN teams ht ON m.home_id = ht.team_id
-                                        JOIN teams at ON m.away_id = at.team_id
-                                        JOIN leagues l ON m.comp_id = l.league_id
-                                        WHERE m.comp_id = {comp_id}
-                                        AND m.season_year = {season}
-                                        ORDER BY m.match_date DESC, m.match_time DESC
-                                        LIMIT 8
-                                    ) as match_subq
-                                )
+                json_build_object(
+                    'teams', json_build_object(
+                        'home', json_build_object(
+                            'stats', json_build_object(
+                                'goals', COALESCE(m.home_goals, 0),
+                                'pen_goals', COALESCE(m.pen_home_goals, 0),
+                                'ranking', m.home_ranking
+                            ),
+                            'team', json_build_object(
+                                'team_id', m.home_id,
+                                'team_name', ht.team_name,
+                                'logo', ht.logo_url
+                            )
+                        ),
+                        'away', json_build_object(
+                            'stats', json_build_object(
+                                'goals', COALESCE(m.away_goals, 0),
+                                'pen_goals', COALESCE(m.pen_away_goals, 0),
+                                'ranking', m.away_ranking
+                            ),
+                            'team', json_build_object(
+                                'team_id', m.away_id,
+                                'team_name', at.team_name,
+                                'logo', at.logo_url
+                            )
+                        )
+                    ),
+                    'match_info', json_build_object(
+                        'match_id', m.match_id,
+                        'match_date', m.match_date,
+                        'date_time_utc', m.date_time_utc,
+                        'round', m.round,
+                        'season_year', m.season_year,
+                        'draw', m."isDraw",
+                        'et', m.extra_time,
+                        'pens', m.pens,
+                        'result', m.result,
+                        'comp_id', m.comp_id,
+                        'comp', l.league_name,
+                        'comp_logo', l.logo_url,
+                        'is_past', true
+                    )
+                ) as match_data
+            FROM matches m
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            JOIN leagues l ON m.comp_id = l.league_id
+            WHERE m.comp_id = {comp_id}
+            AND m.match_date <= CURRENT_DATE
+            ORDER BY m.match_date DESC, m.match_time DESC
+            LIMIT 6
+        ),
+        future_matches AS (
+            SELECT 
+                json_build_object(
+                    'teams', json_build_object(
+                        'home', json_build_object(
+                            'stats', json_build_object(
+                                'goals', NULL,
+                                'pen_goals', NULL,
+                                'ranking', m.home_ranking
+                            ),
+                            'team', json_build_object(
+                                'team_id', m.home_id,
+                                'team_name', ht.team_name,
+                                'logo', ht.logo_url
+                            )
+                        ),
+                        'away', json_build_object(
+                            'stats', json_build_object(
+                                'goals', NULL,
+                                'pen_goals', NULL,
+                                'ranking', m.away_ranking
+                            ),
+                            'team', json_build_object(
+                                'team_id', m.away_id,
+                                'team_name', at.team_name,
+                                'logo', at.logo_url
+                            )
+                        )
+                    ),
+                    'match_info', json_build_object(
+                        'match_id', m.match_id,
+                        'match_date', m.match_date,
+                        'date_time_utc', m.date_time_utc,
+                        'round', m.round,
+                        'season_year', m.season_year,
+                        'draw', NULL,
+                        'et', NULL,
+                        'pens', NULL,
+                        'result', NULL,
+                        'comp_id', m.comp_id,
+                        'comp', l.league_name,
+                        'comp_logo', l.logo_url,
+                        'is_past', false
+                    )
+                ) as match_data
+            FROM matches m
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            JOIN leagues l ON m.comp_id = l.league_id
+            WHERE m.comp_id = {comp_id}
+            AND m.match_date > CURRENT_DATE
+            ORDER BY m.match_date ASC, m.match_time ASC
+            LIMIT 6
+        )
+        SELECT 
+            CASE WHEN (SELECT type FROM league_check) LIKE '%League%' OR (SELECT type FROM league_check) LIKE '%Cup%' THEN
+                json_build_object(
+                    'data', json_agg(
+                        json_build_object(
+                            'info', json_build_object(
+                                'comp_id', l.league_id,
+                                'league_name', l.league_name,
+                                'league_logo', l.logo_url,
+                                'country_id', l.country_id,
+                                'country', l.country,
+                                'type', l.type,
+                                'country_url', t.logo_url
+                            ),
+                            'ranks', CASE WHEN (SELECT type FROM league_check) LIKE '%League%' THEN (
+                                SELECT json_agg(subq)
+                                FROM (
+                                    SELECT 
+                                        json_build_object(
+                                            'rank', lr.rank::text,
+                                            'team', json_build_object(
+                                                'team_id', lr.team_id,
+                                                'team_name', t2.team_name,
+                                                'logo', t2.logo_url
+                                            ),
+                                            'info', COALESCE(lr.info, ''),
+                                            'points', lr.points,
+                                            'gp', lr.gp,
+                                            'wins', lr.wins,
+                                            'losses', lr.losses,
+                                            'draws', lr.draws,
+                                            'goals_f', lr.goals_f,
+                                            'goals_a', lr.goals_a,
+                                            'gd', lr.gd
+                                        ) as subq
+                                    FROM league_ranks lr
+                                    JOIN teams t2 ON lr.team_id = t2.team_id
+                                    WHERE lr.comp_id = {comp_id}
+                                    AND lr.season_year = {season}
+                                    ORDER BY lr.rank::integer ASC
+                                    LIMIT 20
+                                ) as subq
+                            ) ELSE '[]'::json END,
+                            'matches', (
+                                SELECT json_agg(match_data) FROM (
+                                    SELECT * FROM past_matches
+                                    UNION ALL
+                                    SELECT * FROM future_matches
+                                ) combined_matches
                             )
                         )
                     )
-                ELSE
-                    json_build_object('error', 'wrong competition type, make sure id is for a non-league competition')
-                END AS result
-            FROM leagues l
-            LEFT JOIN teams t ON l.country_id = t.team_id
-            WHERE l.league_id = {comp_id}
-            GROUP BY l.league_id, l.league_name, l.country_id, l.type, t.logo_url
+                )
+            ELSE
+                json_build_object('error', 'Invalid competition type')
+            END AS result
+        FROM leagues l
+        LEFT JOIN teams t ON l.country_id = t.team_id
+        WHERE l.league_id = {comp_id}
+        GROUP BY l.league_id, l.league_name, l.country_id, l.type, t.logo_url
+    """
 
-        """
+        
         try:    
             response = requests.post(self.url, headers=self.headers, json={"sql_query": query})
             response.raise_for_status()
@@ -1029,6 +1089,7 @@ class LeagueService:
                 c.logo_url as country_url,
                 c.team_name as country_name,
                 lr.season_year as season,
+                lr.rank_id as rank_id,
                 lr.team_id,
                 t.team_name,
                 t.logo_url as team_logo,
@@ -1040,8 +1101,8 @@ class LeagueService:
             JOIN teams t ON lr.team_id = t.team_id
             LEFT JOIN teams c ON l.country_id = c.team_id  -- Changed to LEFT JOIN for optional country
             JOIN target_comps tc ON lr.comp_id = tc.comp_id
-            WHERE lr.season_year IN (2023, 2024)
-            AND (lr.rank = 1 OR lr.round = 'Winners')
+            WHERE lr.season_year IN (2024, 2023, 2022, 2021, 2020)
+            AND (lr.rank = 1 OR lr.round = 'Winners' OR lr.round = 'Winner')
         )
         SELECT json_build_object(
             'data', json_build_object(
@@ -1068,7 +1129,8 @@ class LeagueService:
                                         'rank', w.rank,
                                         'round', w.round,
                                         'points', w.points,
-                                        'season', w.season
+                                        'season', w.season,
+                                        'rank_id', w.rank_id
                                     )
                                     ORDER BY w.season DESC
                                 ), '[]'::json)

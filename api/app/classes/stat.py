@@ -444,120 +444,7 @@ class StatsService:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
-    def get_team_recent_form(
-        self,
-        comp_id: int,
-        team_id: int,
-        season_year: Optional[int] = None
-    ) -> TeamMatchesResponse:
-        query = f"""
-        SELECT json_agg(recent_matches)
-        FROM (
-            SELECT
-                m.match_id,
-                m.home_id,
-                m.away_id,
-                m.home_goals,
-                m.away_goals,
-                m.match_date,
-                m.result,
-                m.round,
-                m.win_team,
-                m.loss_team,
-                m."isDraw",
-                m.match_time,
-                ht.team_name AS home_team_name,
-                at.team_name AS away_team_name
-            FROM matches m
-            JOIN teams ht ON m.home_id = ht.team_id
-            JOIN teams at ON m.away_id = at.team_id
-            WHERE m.comp_id = {comp_id}
-              AND (m.home_id = {team_id} OR m.away_id = {team_id})
-              AND m.home_goals IS NOT NULL
-              AND m.away_goals IS NOT NULL
-              {"AND m.season_year = " + str(season_year) if season_year is not None else ""}
-            ORDER BY m.match_date DESC
-            LIMIT 6
-        ) recent_matches;
-        """
-
-        try:
-            response = requests.post(self.url, headers=self.headers, json={"query": query})
-            response.raise_for_status()
-
-            results = response.json()
-
-            if not results or not results[0].get("result"):
-                raise HTTPException(
-                    status_code=404,
-                    detail="No matches found for this team in the specified competition"
-                )
-
-            match_data = results[0]["result"]
-            if isinstance(match_data, str):
-                match_data = json.loads(match_data)
-            if isinstance(match_data, dict):
-                match_data = [match_data]
-
-            # Calculate points and prepare matches
-            points = 0
-            gd = 0
-            gf = 0
-            ga = 0
-            w = 0
-            l = 0
-            d = 0
-            matches = []
-            for match in match_data:
-                # Create match object
-                match_obj = TeamMatch(**match)
-                matches.append(match_obj)
-
-                # Calculate points
-                if match_obj.isDraw:
-                    d += 1
-                    points += 1
-                elif team_id == match_obj.win_team:
-                    w += 1
-                    points += 3
-                else:
-                    l += 1
-
-                h_goals = match_obj.home_goals
-                a_goals = match_obj.away_goals
-                if team_id == match_obj.home_id:
-                    gf = gf + h_goals
-                    ga = ga + a_goals
-
-                else:
-                    gf = gf + a_goals
-                    ga = ga + h_goals
-
-            gd = gf - ga
-
-
-            #print(f'{points} Points - {w}W {l}L {d}D - GD: {gd} GF: {gf} GA: {ga}')
-            # Return the properly structured response
-            return {
-                "matches": matches,
-                "points": points,
-                "wins": w,
-                "losses": l,
-                "draws": d,
-                "gf": gf,
-                "ga": ga,
-                "gd": gd
-            }
-
-        except requests.exceptions.HTTPError as http_err:
-            error_detail = response.text if hasattr(response, 'text') else str(http_err)
-            raise HTTPException(status_code=500, detail=f"HTTP error occurred: {error_detail}")
-        except json.JSONDecodeError as json_err:
-            raise HTTPException(status_code=500, detail=f"JSON decode error: {str(json_err)}")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
-
+   
     def get_no_losses(self):
         query = f"""
         SELECT json_agg(top_teams)
@@ -651,7 +538,7 @@ class StatsService:
         """
 
         try:
-            response = requests.post(self.url, headers=self.headers, json={"query": query})
+            response = requests.post(self.url, headers=self.headers, json={"sql_query": query})
             if response.status_code == 200:
                 results = response.json()
 

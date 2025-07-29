@@ -364,7 +364,7 @@ class TeamService:
                 json_build_object(
                     'player_id', p.player_id,
                     'player_name', p.player_name,
-                    'img', NULL
+                    'img', p.pic_url
                 ) as player,
                 json_build_object(
                     'comp_id', ps.comp_id,
@@ -614,6 +614,90 @@ class TeamService:
                 status_code=500,
                 detail=f"Unexpected error: {str(e)}"
             )
+        
+    def get_comp_finishes_by_year(self, team_id: int, season: int):
+        query = f"""
+        WITH team_comps AS (
+            SELECT 
+                lr.rank,
+                lr.round,
+                lr.season_year,
+                lr.points,
+                lr.team_id,
+                lr.comp_id,
+                l.league_name as comp_name,
+                l.logo_url as comp_logo,
+                t.team_name,
+                t.logo_url as team_logo
+            FROM league_ranks lr
+            JOIN leagues l ON lr.comp_id = l.league_id
+            JOIN teams t ON lr.team_id = t.team_id
+            WHERE lr.team_id = {team_id} AND lr.season_year = {season}
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'season_comps', COALESCE(
+                    (SELECT json_agg(
+                        json_build_object(
+                            'ranking', json_build_object(
+                                'rank', tc.rank,
+                                'round', tc.round,
+                                'points', tc.points,
+                                'season', tc.season_year,
+                                'team_id', tc.team_id,
+                                'comp', json_build_object(
+                                    'comp_id', tc.comp_id,
+                                    'comp_name', tc.comp_name,
+                                    'comp_url', tc.comp_logo
+                                )
+                            )
+                        )
+                    ) FROM team_comps tc),
+                    '[]'::json
+                ),
+                'team', (
+                    SELECT json_build_object(
+                        'team_id', tc.team_id,
+                        'team_name', tc.team_name,
+                        'logo', tc.team_logo
+                    )
+                    FROM team_comps tc
+                    LIMIT 1
+                )
+            )
+        ) as result
+
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response status: {response.status_code}")
+            #print(f"Supabase raw response text: {response.text}")
+            # The response structure is {"data": {...}} not a list with result[0]
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for team {team_id}"
+                )
+            # Parse the response according to the actual structure
+            return result
+
+        except requests.exceptions.HTTPError as http_err:
+            error_detail = response.text if hasattr(response, 'text') else str(http_err)
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Supabase error: {error_detail}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
 
     def get_transfers_by_date(self, team_id: int, start_date: str, end_date:str):
         query = f"""
@@ -718,14 +802,21 @@ class TeamService:
             )
         
 
-    def get_comp_finishes_by_year(self, team_id: int, season: int):
+    def get_domestic_finishes(self, team_id: int, season: int):
         query = f"""
-        WITH team_comps AS (
+        WITH domestic_rankings AS (
             SELECT 
                 lr.rank,
                 lr.round,
                 lr.season_year,
                 lr.points,
+                lr.gp,
+                lr.gd,
+                lr.wins,
+                lr.losses,
+                lr.draws,
+                lr.goals_f,
+                lr.goals_a,
                 lr.team_id,
                 lr.comp_id,
                 l.league_name as comp_name,
@@ -735,42 +826,47 @@ class TeamService:
             FROM league_ranks lr
             JOIN leagues l ON lr.comp_id = l.league_id
             JOIN teams t ON lr.team_id = t.team_id
-            WHERE lr.team_id = {team_id} AND lr.season_year = {season}
+            WHERE lr.team_id = {team_id} 
+            AND lr.season_year BETWEEN {season - 10} AND {season}
+            AND l.type LIKE '%Domestic League%'
+            ORDER BY lr.season_year DESC
         )
         SELECT json_build_object(
             'data', json_build_object(
-                'season_comps', COALESCE(
+                'seasons', COALESCE(
                     (SELECT json_agg(
                         json_build_object(
-                            'ranking', json_build_object(
-                                'rank', tc.rank,
-                                'round', tc.round,
-                                'points', tc.points,
-                                'season', tc.season_year,
-                                'team_id', tc.team_id,
-                                'comp', json_build_object(
-                                    'comp_id', tc.comp_id,
-                                    'comp_name', tc.comp_name,
-                                    'comp_url', tc.comp_logo
-                                )
-                            )
+                            'rank', json_build_object(
+                                'team', json_build_object(
+                                    'team_id', dr.team_id,
+                                    'team_name', dr.team_name,
+                                    'logo', dr.team_logo
+                                ),
+                                'rank', dr.rank::text,
+                                'info', dr.round,
+                                'points', dr.points,
+                                'gp', dr.gp,
+                                'gd', dr.gd,
+                                'wins', dr.wins,
+                                'losses', dr.losses,
+                                'draws', dr.draws,
+                                'goals_f', dr.goals_f,
+                                'goals_a', dr.goals_a
+                            ),
+                            'comp', json_build_object(
+                                'comp_id', dr.comp_id,
+                                'comp_name', dr.comp_name,
+                                'comp_url', dr.comp_logo
+                            ),
+                            'season', dr.season_year
                         )
-                    ) FROM team_comps tc),
+                    ) FROM domestic_rankings dr),
                     '[]'::json
-                ),
-                'team', (
-                    SELECT json_build_object(
-                        'team_id', tc.team_id,
-                        'team_name', tc.team_name,
-                        'logo', tc.team_logo
-                    )
-                    FROM team_comps tc
-                    LIMIT 1
                 )
             )
         ) as result
-        
         """
+        
         try:
             response = requests.post(
                 self.url,
@@ -781,12 +877,14 @@ class TeamService:
             result = response.json()
             #print(f"Supabase raw response status: {response.status_code}")
             #print(f"Supabase raw response text: {response.text}")
+            
             # The response structure is {"data": {...}} not a list with result[0]
             if not result or not result.get("data"):
                 raise HTTPException(
                     status_code=404,
-                    detail=f"No data found for team {team_id}"
+                    detail=f"No domestic league data found for team {team_id} in the past 5 seasons"
                 )
+            
             # Parse the response according to the actual structure
             return result
             
@@ -801,4 +899,3 @@ class TeamService:
                 status_code=500,
                 detail=f"Unexpected error: {str(e)}"
             )
-

@@ -83,7 +83,7 @@ def get_matches_dates(player_id: int, start_date: date = Query("2024-11-01", des
     return stats
 
 # GET details of the last game where the player had a g/a
-@router.get("/{player_id}/recent-goals", response_model=PlayerRecentGAResponse)
+@router.get("/{player_id}/recent-ga", response_model=PlayerRecentGAResponse)
 async def get_player_recent_ga(player_id: int, supabase: Client = Depends(get_supabase_client)):
     try:
         service = PlayerService(supabase)

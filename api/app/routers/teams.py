@@ -3,7 +3,7 @@ from supabase import Client
 from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.team import TeamService, TeamPlayersStatsResponse
-from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse, LeagueMatchesResponse, TeamTransfersResponse, TeamSeasonResponse
+from app.models.response import TeamInfoResponse, TeamData, TeamSquadDataResponse, LeagueMatchesResponse, TeamTransfersResponse, TeamSeasonResponse, DomesticSeasonsResponse
 from app.constants import GLOBAL_YEAR
 from typing import List
 
@@ -32,9 +32,28 @@ async def get_team(team_id: str, supabase: Client = Depends(get_supabase_client)
 
 # GET team squad per year (maybe include only people that in the subs)
 
+# GET most expensive outgoing and incoming transfers
 
 # GET all matches in a comp in a year
 @router.get("/{team_id}/matches", response_model=LeagueMatchesResponse)
+def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
+    service = TeamService(supabase)
+    stats = service.get_team_matches_by_year(team_id=team_id, season=season)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
+
+# GET total goals_for and goals_against per season for 10 years
+@router.get("/{team_id}/goals_past10", response_model=LeagueMatchesResponse)
+def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
+    service = TeamService(supabase)
+    stats = service.get_team_matches_by_year(team_id=team_id, season=season)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
+
+# GET highest goalscorers/assists All comps per season 10 years
+@router.get("/{team_id}/topga_past10", response_model=LeagueMatchesResponse)
 def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
     service = TeamService(supabase)
     stats = service.get_team_matches_by_year(team_id=team_id, season=season)
@@ -56,6 +75,15 @@ def get_transfers(team_id: int, start_date: date = Query("2024-05-01", descripti
 def get_all_comp_finishes(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
     service = TeamService(supabase)
     stats = service.get_comp_finishes_by_year(team_id=team_id, season=season)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
+
+# GET the teams previous 5 Domestic League finishes
+@router.get("/{team_id}/domestic", response_model=DomesticSeasonsResponse)
+def get_domestic_finishes(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
+    service = TeamService(supabase)
+    stats = service.get_domestic_finishes(team_id=team_id, season=season)
     if not stats:
         raise HTTPException(status_code=404, detail="Stats not found")
     return stats

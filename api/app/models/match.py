@@ -37,7 +37,7 @@ class Match(BaseModel):
     
 class MatchTeamStats(BaseModel):
     ranking: Optional[int] = None
-    goals: int
+    goals: Optional[int]
     xg: Optional[float]
     pen_goals: Optional[int]
     possesion: Optional[float]
@@ -247,8 +247,8 @@ class MatchEvents(BaseModel):
     event_type: str
     minute: int
     add_minute: int
-    home_goals: int
-    away_goals: int
+    home_goals: Optional[int]
+    away_goals: Optional[int]
     team_id: int
     active_player: Optional[PlayerBasicInfo]
     passive_player: Optional[PlayerBasicInfo]
@@ -259,7 +259,7 @@ class MatchTeamInfo(BaseModel):
 
 class MatchTeamData(BaseModel):
     info: Optional["MatchTeamInfo"]
-    lineups: List[MatchLineups]
+    lineups: Optional[List[MatchLineups]]
     team_stats: Optional[MatchTeamStats]
 
 class MatchTeams(BaseModel):

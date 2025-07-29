@@ -116,6 +116,16 @@ class TeamSeasonData(BaseModel):
     team: Team
 class TeamSeasonResponse(BaseModel):
     data: TeamSeasonData
+
+# /teams/:id/past-domestic
+class DomesticSeason(BaseModel):
+    rank: TeamRank
+    comp: Comp
+    season: int
+class DomesticSeasonsData(BaseModel):
+    seasons: List[DomesticSeason]
+class DomesticSeasonsResponse(BaseModel):
+    data: DomesticSeasonsData
 """
 end
 """
@@ -127,6 +137,7 @@ class WinTeam(BaseModel):
     round: Optional[str] = None
     points: Optional[int] = None
     season: int
+    rank_id: int
 class TopCompsWinners(BaseModel):
     comp: LeagueInfo
     win_teams: List[WinTeam]
@@ -144,7 +155,7 @@ class LeagueWinnersResponse(BaseModel):
 # /leagues/:id/infos
 class LeagueData(BaseModel):
     info: LeagueInfo
-    ranks: List[TeamRank]
+    ranks: Optional[List[TeamRank]] = None
     matches: List[Match]
 class LeagueDataResponse(BaseModel):
     data: List[LeagueData]
