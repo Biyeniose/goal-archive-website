@@ -407,6 +407,274 @@ class LeagueService:
                 detail=f"Unexpected error: {str(e)}"
             )
 
+    # /leagues/{league_id}/past-stats get #1 highest stats of a league for past 10 years
+    def top_ga_stats_past10(self, league_id: int, stat: str, age: int):
+        query = f"""
+            WITH yearly_top_scorers AS (
+                SELECT 
+                    ps.season_year,
+                    ps.player_id,
+                    ps.team_id,
+                    ps.goals,
+                    ps.assists,
+                    (ps.goals + ps.assists) AS ga,
+                    ps.penalty_goals,
+                    ps.gp,
+                    ps.minutes,
+                    ps.cs,
+                    ps.goals_concede,
+                    ps.yellows,
+                    ps.yellows2,
+                    ps.reds,
+                    ps.own_goals,
+                    ps.stats_id,
+                    RANK() OVER (PARTITION BY ps.season_year ORDER BY (ps.goals + ps.assists) DESC) AS ga_rank
+                FROM player_stats ps
+                WHERE ps.comp_id = {league_id}
+                AND ps.season_year BETWEEN 2014 AND 2024
+            ),
+            top_players AS (
+                SELECT 
+                    yts.*,
+                    pl.player_name,
+                    pl.age,
+                    pl.pic_url,
+                    pl.position,
+                    pl.nation1_id,
+                    pl.nation2_id,
+                    t.team_name,
+                    t.logo_url AS team_logo,
+                    n1.team_name AS nation1_name,
+                    n1.logo_url AS nation1_logo,
+                    n2.team_name AS nation2_name,
+                    n2.logo_url AS nation2_logo
+                FROM yearly_top_scorers yts
+                JOIN players pl ON yts.player_id = pl.player_id
+                JOIN teams t ON yts.team_id = t.team_id
+                LEFT JOIN teams n1 ON pl.nation1_id = n1.team_id
+                LEFT JOIN teams n2 ON pl.nation2_id = n2.team_id
+                WHERE yts.ga_rank = 1
+                ORDER BY yts.season_year DESC
+            )
+            SELECT json_build_object(
+                'data', json_build_object(
+                    'stats', (
+                        SELECT json_agg(
+                            json_build_object(
+                                'season_year', tp.season_year,
+                                'player', json_build_object(
+                                    'id', tp.player_id,
+                                    'name', tp.player_name,
+                                    'current_age', tp.age,
+                                    'pic_url', tp.pic_url,
+                                    'nations', json_build_object(
+                                        'nation1_id', tp.nation1_id,
+                                        'nation1', tp.nation1_name,
+                                        'nation1_logo', tp.nation1_logo,
+                                        'nation2_id', tp.nation2_id,
+                                        'nation2', tp.nation2_name,
+                                        'nation2_logo', tp.nation2_logo
+                                    )
+                                ),
+                                'team', json_build_object(
+                                    'team_id', tp.team_id,
+                                    'team_name', tp.team_name,
+                                    'logo', tp.team_logo
+                                ),
+                                'age', tp.age,
+                                'position', tp.position,
+                                'ga', tp.ga,
+                                'ga_pg', NULL,
+                                'goals', tp.goals,
+                                'goals_pg', NULL,
+                                'assists', tp.assists,
+                                'assists_pg', NULL,
+                                'penalty_goals', tp.penalty_goals,
+                                'gp', tp.gp,
+                                'minutes', tp.minutes,
+                                'minutes_pg', NULL,
+                                'cs', tp.cs,
+                                'pass_compl_pg', NULL,
+                                'passes_pg', NULL,
+                                'errors_pg', NULL,
+                                'shots_pg', NULL,
+                                'shots_on_target_pg', NULL,
+                                'sca_pg', NULL,
+                                'gca_pg', NULL,
+                                'take_ons_pg', NULL,
+                                'take_ons_won_pg', NULL,
+                                'goals_concede', tp.goals_concede,
+                                'yellows', tp.yellows,
+                                'yellows2', tp.yellows2,
+                                'reds', tp.reds,
+                                'own_goals', tp.own_goals,
+                                'stats_id', tp.stats_id
+                            )
+                        ) FROM top_players tp
+                    )
+                )
+            ) as result;
+        """
+
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response text: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for league {league_id}"
+                )
+            # Parse the response according to the actual structure
+            #return LeagueStatsResponse(data=result["data"])
+            return result
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+    # /leagues/{league_id}/past-stats get #1 highest stats BY STAT
+    def top_stats_past10_by_stat(self, league_id: int, stat: str, age: int):
+        query = f"""
+            WITH yearly_top_scorers AS (
+                SELECT 
+                    ps.season_year,
+                    ps.player_id,
+                    ps.team_id,
+                    ps.age,  -- Added player_stats.age here
+                    ps.goals,
+                    ps.assists,
+                    ps.ga,
+                    ps.penalty_goals,
+                    ps.gp,
+                    ps.minutes,
+                    ps.cs,
+                    ps.goals_concede,
+                    ps.yellows,
+                    ps.yellows2,
+                    ps.reds,
+                    ps.own_goals,
+                    ps.stats_id,
+                    RANK() OVER (PARTITION BY ps.season_year ORDER BY ps.{stat} DESC) AS ga_rank
+                FROM player_stats ps
+                WHERE ps.comp_id = {league_id} AND ps.age <= {age} AND ps.season_year BETWEEN 2014 AND 2024
+            ),
+            top_players AS (
+                SELECT 
+                    yts.*,
+                    pl.player_name,
+                    pl.age AS player_age,  -- Renamed to distinguish from player_stats.age
+                    pl.pic_url,
+                    pl.position,
+                    pl.nation1_id,
+                    pl.nation2_id,
+                    t.team_name,
+                    t.logo_url AS team_logo,
+                    n1.team_name AS nation1_name,
+                    n1.logo_url AS nation1_logo,
+                    n2.team_name AS nation2_name,
+                    n2.logo_url AS nation2_logo
+                FROM yearly_top_scorers yts
+                JOIN players pl ON yts.player_id = pl.player_id
+                JOIN teams t ON yts.team_id = t.team_id
+                LEFT JOIN teams n1 ON pl.nation1_id = n1.team_id
+                LEFT JOIN teams n2 ON pl.nation2_id = n2.team_id
+                WHERE yts.ga_rank = 1
+                ORDER BY yts.season_year DESC
+            )
+            SELECT json_build_object(
+                'data', json_build_object(
+                    'stats', (
+                        SELECT json_agg(
+                            json_build_object(
+                                'season_year', tp.season_year,
+                                'player', json_build_object(
+                                    'id', tp.player_id,
+                                    'name', tp.player_name,
+                                    'current_age', tp.player_age,  -- Using players.age here
+                                    'pic_url', tp.pic_url,
+                                    'nations', json_build_object(
+                                        'nation1_id', tp.nation1_id,
+                                        'nation1', tp.nation1_name,
+                                        'nation1_logo', tp.nation1_logo,
+                                        'nation2_id', tp.nation2_id,
+                                        'nation2', tp.nation2_name,
+                                        'nation2_logo', tp.nation2_logo
+                                    )
+                                ),
+                                'team', json_build_object(
+                                    'team_id', tp.team_id,
+                                    'team_name', tp.team_name,
+                                    'logo', tp.team_logo
+                                ),
+                                'age', tp.age,  -- Using player_stats.age here
+                                'position', tp.position,
+                                'ga', tp.ga,
+                                'ga_pg', NULL,
+                                'goals', tp.goals,
+                                'goals_pg', NULL,
+                                'assists', tp.assists,
+                                'assists_pg', NULL,
+                                'penalty_goals', tp.penalty_goals,
+                                'gp', tp.gp,
+                                'minutes', tp.minutes,
+                                'minutes_pg', NULL,
+                                'cs', tp.cs,
+                                'pass_compl_pg', NULL,
+                                'passes_pg', NULL,
+                                'errors_pg', NULL,
+                                'shots_pg', NULL,
+                                'shots_on_target_pg', NULL,
+                                'sca_pg', NULL,
+                                'gca_pg', NULL,
+                                'take_ons_pg', NULL,
+                                'take_ons_won_pg', NULL,
+                                'goals_concede', tp.goals_concede,
+                                'yellows', tp.yellows,
+                                'yellows2', tp.yellows2,
+                                'reds', tp.reds,
+                                'own_goals', tp.own_goals,
+                                'stats_id', tp.stats_id
+                            )
+                        ) FROM top_players tp
+                    )
+                )
+            ) as result;
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response text: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for league {league_id}"
+                )
+            # Parse the response according to the actual structure
+            #return LeagueStatsResponse(data=result["data"])
+            return result
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+
+    # next one will use match and date range of a comp to determine highest goal scorer
+
     # /leagues/:league_id/:team_id/stats get highest stats of a league by year and stat
     def most_league_stats_by_team(self, team_id: int, league_id: int, season: Optional[int] = None, stat: str = "goals", age: int = 999, all_time: bool = False):
         # Base WHERE clauses

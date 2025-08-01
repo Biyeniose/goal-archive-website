@@ -19,10 +19,24 @@ router = APIRouter(
 
 # GET Players stats in all competitions per season
 @router.get("/{player_id}/allstats", response_model=PlayerSeasonStatsResponse)
-async def get_season_stats(player_id: int, season: int = Query(2024, description="Season year"),supabase: Client = Depends(get_supabase_client)):
+async def get_season_stats(player_id: int, season: int = Query(GLOBAL_YEAR, description="Season year"),supabase: Client = Depends(get_supabase_client)):
     try:
         service = PlayerService(supabase)
         stats = service.get_player_stats_all_seasons(player_id=player_id, season=season)
+
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# GET Players career overall stats
+@router.get("/{player_id}/career", response_model=PlayerSeasonStatsResponse)
+async def get_season_stats(player_id: int,supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_career_stats(player_id=player_id)
 
         if not stats:
             raise HTTPException(status_code=404, detail="Stats not found")

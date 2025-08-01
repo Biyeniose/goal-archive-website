@@ -281,6 +281,95 @@ class PlayerService:
                 detail=f"Unexpected error: {str(e)}"
             )
 
+    def get_career_stats(self, player_id: int):
+        query = f"""
+        WITH all_stats AS (
+            SELECT
+                json_agg(
+                    json_build_object(
+                        'player', json_build_object(
+                            'player_id', p.player_id,
+                            'player_name', p.player_name,
+                            'img', p.pic_url
+                        ),
+                        'comp', json_build_object(
+                            'comp_id', l.league_id,
+                            'comp_name', l.league_name,
+                            'comp_url', l.logo_url
+                        ),
+                        'team', json_build_object(
+                            'team_id', t.team_id,
+                            'team_name', t.team_name,
+                            'logo', t.logo_url
+                        ),
+                        'season_year', ps.season_year,
+                        'age', ps.age,
+                        'ga', ps.ga,
+                        'ga_pg', ps.ga_pg,
+                        'goals', ps.goals,
+                        'goals_pg', ps.goals_pg,
+                        'assists', ps.assists,
+                        'assists_pg', ps.assists_pg,
+                        'penalty_goals', ps.penalty_goals,
+                        'gp', ps.gp,
+                        'minutes', ps.minutes,
+                        'minutes_pg', ps.minutes_pg,
+                        'cs', ps.cs,
+                        'pass_compl_pg', ps.pass_compl_pg,
+                        'passes_pg', ps.passes_pg,
+                        'errors_pg', ps.errors_pg,
+                        'shots_pg', ps.shots_pg,
+                        'shots_on_target_pg', ps.shots_on_target_pg,
+                        'sca_pg', ps.sca_pg,
+                        'gca_pg', ps.gca_pg,
+                        'take_ons_pg', ps.take_ons_pg,
+                        'take_ons_won_pg', ps.take_ons_won_pg,
+                        'goals_concede', ps.goals_concede,
+                        'yellows', ps.yellows,
+                        'yellows2', ps.yellows2,
+                        'reds', ps.reds,
+                        'own_goals', ps.own_goals,
+                        'stats_id', ps.stats_id
+                    )
+                ) AS stats_array
+            FROM player_stats ps
+            JOIN players p ON ps.player_id = p.player_id
+            JOIN leagues l ON ps.comp_id = l.league_id
+            JOIN teams t ON ps.team_id = t.team_id
+            WHERE ps.player_id = {player_id}
+        )
+        SELECT 
+            json_build_object(
+                'data', json_build_object(
+                    'stats', stats_array
+                )
+            ) AS result
+        FROM all_stats;    
+        """
+
+        try:
+            # Use "query" instead of "sql_query" for the parameter name
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}  # Changed from "sql_query" to "query"
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for player {player_id}"
+                )
+            
+            return result
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
 
     def get_matches_by_season(self, player_id: int, season: int):
         query = f"""
