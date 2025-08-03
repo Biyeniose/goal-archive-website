@@ -141,7 +141,7 @@ def get_recent_winners(league_id: int, supabase: Client = Depends(get_supabase_c
     return stats
 
 # get HIGHEST col from league_ranks table (Highest league_ranks.GOALS_F, rank, points) past 10 years. WOULD NOT WORK for fa cups since its only Rank 1 but Ill use script to update)
-@router.get("/{league_id}/highest_stat", response_model=LeagueTeamStatResponse)
+@router.get("/{league_id}/team_highest_stat", response_model=LeagueTeamStatResponse)
 def get_highest_league_stat(league_id: int, stat: str = Query("goals_f", description="Points, Goals F/A, Points, Wins, Losses"), start_year: int = Query(2010, description="Start year"), end_year: int = Query(GLOBAL_YEAR, description="End year"), desc: bool = Query(True, description="Desc or Asc order"), supabase: Client = Depends(get_supabase_client)):
     service = LeagueService(supabase)
     stats = service.get_highest_league_stat(league_id=league_id, stat=stat, start_year=start_year, end_year=end_year, desc=desc)

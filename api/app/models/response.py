@@ -210,12 +210,12 @@ class LeagueStatsResponse(BaseModel):
     data: LeagueStatsContainer
 
 # /leagues/:id/past-topbystat
-class LeagueStatsContainer(BaseModel):
+class LeaguePastStatsContainer(BaseModel):
     comp: LeagueInfo
     years: Dict[str, List[LeaguePlayerStatsData]]
     #stats: List[LeaguePlayerStatsData]
 class LeaguePastStatsData(BaseModel):
-    stats: LeagueStatsContainer
+    stats: LeaguePastStatsContainer
 class LeaguePastStatsResponse(BaseModel):
     data: LeaguePastStatsData
 
