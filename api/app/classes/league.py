@@ -1815,5 +1815,101 @@ class LeagueService:
                 detail=f"Unexpected error: {str(e)}"
             )
    
+    # /leagues/:id/highest_stat_by_year
+    def get_highest_league_stat_by_year(self, league_id: int, stat: str, season: int, desc: bool):
+        if desc:
+            order_direction = "DESC"
+        else:
+            order_direction = "ASC"
+
+        query = f"""
+        WITH league_info AS (
+            SELECT 
+                l.league_id as comp_id,
+                l.league_name,
+                l.country_id,
+                l.logo_url as league_logo,
+                l.type,
+                ct.team_name as country,
+                ct.logo_url as country_url
+            FROM leagues l
+            LEFT JOIN teams ct ON ct.team_id = l.country_id
+            WHERE l.league_id = {league_id}
+        ),
+        ranked_teams AS (
+            SELECT 
+                json_build_object(
+                    'team', json_build_object(
+                        'team_id', t.team_id,
+                        'team_name', t.team_name,
+                        'logo', t.logo_url
+                    ),
+                    'rank', lr.rank::text,
+                    'info', lr.info,
+                    'points', lr.points,
+                    'gp', lr.gp,
+                    'gd', lr.gd,
+                    'wins', lr.wins,
+                    'losses', lr.losses,
+                    'draws', lr.draws,
+                    'goals_f', lr.goals_f,
+                    'goals_a', lr.goals_a
+                ) as team_data
+            FROM league_ranks lr
+            JOIN teams t ON t.team_id = lr.team_id
+            WHERE lr.comp_id = {league_id} AND lr.season_year = {season}
+            ORDER BY
+                CASE WHEN '{order_direction}' = 'DESC' THEN lr.{stat} END DESC,
+                CASE WHEN '{order_direction}' = 'ASC' THEN lr.{stat} END ASC
+            LIMIT 3
+        ),
+        teams_array AS (
+            SELECT 
+                COALESCE(
+                    json_agg(rt.team_data),
+                    '[]'::json
+                ) as teams_data
+            FROM ranked_teams rt
+        ),
+        years_data AS (
+            SELECT 
+                json_build_object(
+                    '{season}', (SELECT teams_data FROM teams_array)
+                ) as years
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'stats', json_build_object(
+                    'comp', (SELECT to_json(li) FROM league_info li),
+                    'years', (SELECT years FROM years_data)
+                )
+            )
+        ) as result;
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response text: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for recent winners"
+                )
+            # Parse the response according to the actual structure
+            #return LeagueStatsResponse(data=result["data"])
+            return result
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+   
+
 
 

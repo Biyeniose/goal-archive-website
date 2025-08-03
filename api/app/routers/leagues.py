@@ -147,6 +147,15 @@ def get_highest_league_stat(league_id: int, stat: str = Query("goals_f", descrip
         raise HTTPException(status_code=404, detail="Stats not found")
     return stats
 
+# same as above but by year
+@router.get("/{league_id}/highest_stat_year", response_model=LeagueTeamStatResponse)
+def get_highest_league_stat_year(league_id: int, stat: str = Query("goals_f", description="Points, Goals F/A, Points, Wins, Losses"), season: int = Query(GLOBAL_YEAR, description="year"), desc: bool = Query(True, description="Desc or Asc order"), supabase: Client = Depends(get_supabase_client)):
+    service = LeagueService(supabase)
+    stats = service.get_highest_league_stat_by_year(league_id=league_id, stat=stat, season=season, desc=desc)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+    return stats
+
 # get the highest top 3 league_ranks.goals_for, wins, losses for a league by year
 
 
