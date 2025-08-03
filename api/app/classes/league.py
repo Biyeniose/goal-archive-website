@@ -9,8 +9,8 @@ from typing import Optional
 from app.models.response import LeagueDataResponse, LeagueStatsResponse
 from app.models.player import PlayerBasicInfo
 from app.models.team import Team
-from app.models.response import WinTeam, TopCompsWinners, LeagueWinnersResponse, LeagueWinnersData
-from app.models.league import LeagueInfo
+from app.models.response import WinTeam, TopCompsWinners, LeagueWinnersResponse, LeagueWinnersData, LeagueTeamStatResponse, LeagueTeamStatData, TeamLeagueStats
+from app.models.league import LeagueInfo, TeamRank
 
 
 class LeagueService:
@@ -564,7 +564,7 @@ class LeagueService:
                     ps.stats_id,
                     RANK() OVER (PARTITION BY ps.season_year ORDER BY ps.{stat} DESC) AS ga_rank
                 FROM player_stats ps
-                WHERE ps.comp_id = {league_id} AND ps.age <= {age} AND ps.season_year BETWEEN 2014 AND 2024
+                WHERE ps.comp_id = {league_id} AND ps.age <= {age} AND ps.season_year BETWEEN 2010 AND 2024
             ),
             top_players AS (
                 SELECT 
@@ -1459,14 +1459,14 @@ class LeagueService:
                 country = self.supabase.table('teams').select('*').eq('team_id', league.data['country_id']).single().execute()
             
             # Define the specific seasons we want
-            target_seasons = [2024, 2023, 2022, 2021, 2020, 2019]
+            target_seasons = [2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012, 2011, 2010]
             
             # Get winners for the specific seasons
             winners = self.supabase.table('league_ranks') \
                 .select('*') \
                 .eq('comp_id', league_id) \
                 .in_('season_year', target_seasons) \
-                .or_('rank.eq.1,round.eq.Winners') \
+                .or_('rank.eq.1,round.eq.Winners,round.eq.Winner') \
                 .execute()
             
             # Get team details for each winner
@@ -1483,7 +1483,8 @@ class LeagueService:
                     rank=winner.get('rank'),
                     round=winner.get('round'),
                     points=winner.get('points'),
-                    season=winner['season_year']
+                    season=winner['season_year'],
+                    rank_id=winner['rank_id']
                 ))
             
             # Sort by season descending
@@ -1515,6 +1516,7 @@ class LeagueService:
                 detail=f"Unexpected error: {str(e)}"
             )
         
+    # Same above
     def get_league_winners_by_years(self, league_id: int, start_year: int, end_year: int):
         try:
             # Validate year inputs
@@ -1592,9 +1594,226 @@ class LeagueService:
             )
 
 
+    # /leagues/:id/highest_stat
+    def get_highest_league_stat2(self, league_id: int, stat: str, start_year: int, end_year: int, desc: bool):
+        try:
+            # Validate year inputs
+            if start_year > end_year:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Start year must be less than or equal to end year"
+                )
+            
+            # Validate stat field
+            valid_stats = {
+                'rank', 'info', 'points', 'gp', 'gd', 'wins', 
+                'losses', 'draws', 'goals_f', 'goals_a'
+            }
+            if stat not in valid_stats:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid stat field. Must be one of: {', '.join(valid_stats)}"
+                )
+            
+            # First get league info
+            league = self.supabase.table('leagues').select('*').eq('league_id', league_id).single().execute()
+            
+            # Get country info if exists
+            country = None
+            if league.data.get('country_id'):
+                country = self.supabase.table('teams').select('*').eq('team_id', league.data['country_id']).single().execute()
+            
+            # Generate the range of seasons we want (inclusive)
+            target_seasons = list(range(start_year, end_year + 1))
+            
+            # Initialize the response structure
+            years_data = {}
+            
+            for season in target_seasons:
+                # Get teams for this season ordered by the specified stat
+                # Correct order syntax for Python supabase client
+                query = self.supabase.table('league_ranks') \
+                    .select('*') \
+                    .eq('comp_id', league_id) \
+                    .eq('season_year', season)
+                
+                # Apply ordering based on the stat and direction
+                if desc:
+                    query = query.order(stat, desc=True)
+                else:
+                    query = query.order(stat)
+                
+                # Execute the query with limit
+                teams = query.limit(3).execute()
+                
+                # Process teams for this season
+                season_teams = []
+                for team_data in teams.data:
+                    team = self.supabase.table('teams').select('*').eq('team_id', team_data['team_id']).single().execute()
+                    
+                    season_teams.append(TeamRank(
+                        team=Team(
+                            team_id=team.data['team_id'],
+                            team_name=team.data['team_name'],
+                            logo=team.data.get('logo_url')
+                        ),
+                        rank=str(team_data.get('rank')),
+                        info=team_data.get('info'),
+                        points=team_data.get('points'),
+                        gp=team_data.get('gp'),
+                        gd=team_data.get('gd'),
+                        wins=team_data.get('wins'),
+                        losses=team_data.get('losses'),
+                        draws=team_data.get('draws'),
+                        goals_f=team_data.get('goals_f'),
+                        goals_a=team_data.get('goals_a')
+                    ))
+                
+                # Add to years data
+                years_data[str(season)] = season_teams
+            
+            # Build the response
+            comp = LeagueInfo(
+                comp_id=league.data['league_id'],
+                league_name=league.data['league_name'],
+                country_id=league.data.get('country_id'),
+                country=country.data['team_name'] if country else None,
+                league_logo=league.data.get('logo_url'),
+                type=league.data.get('type'),
+                country_url=country.data.get('logo_url') if country else None
+            )
+            
+            stats = TeamLeagueStats(
+                comp=comp,
+                years=years_data
+            )
+            
+            return LeagueTeamStatResponse(
+                data=LeagueTeamStatData(stats=stats)
+            )
+            
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+   
 
+    # /leagues/:id/highest_stat
+    def get_highest_league_stat(self, league_id: int, stat: str, start_year: int, end_year: int, desc: bool):
+        if desc:
+            order_direction = "DESC"
+        else:
+            order_direction = "ASC"
 
-
-
+        query = f"""
+        WITH league_info AS (
+        SELECT 
+            l.league_id as comp_id,
+            l.league_name,
+            l.country_id,
+            l.logo_url as league_logo,
+            l.type,
+            ct.team_name as country,
+            ct.logo_url as country_url
+        FROM leagues l
+        LEFT JOIN teams ct ON ct.team_id = l.country_id
+        WHERE l.league_id = {league_id}
+    ),
+    season_series AS (
+        SELECT generate_series({start_year}, {end_year}) as season_year
+    ),
+    ranked_teams AS (
+        SELECT 
+            ss.season_year,
+            lr.team_id,
+            ROW_NUMBER() OVER (
+                PARTITION BY ss.season_year 
+                ORDER BY 
+                    CASE WHEN '{order_direction}' = 'DESC' THEN lr.{stat} END DESC,
+                    CASE WHEN '{order_direction}' = 'ASC' THEN lr.{stat} END ASC
+            ) as row_num,
+            json_build_object(
+                'team', json_build_object(
+                    'team_id', t.team_id,
+                    'team_name', t.team_name,
+                    'logo', t.logo_url
+                ),
+                'rank', lr.rank::text,
+                'info', lr.info,
+                'points', lr.points,
+                'gp', lr.gp,
+                'gd', lr.gd,
+                'wins', lr.wins,
+                'losses', lr.losses,
+                'draws', lr.draws,
+                'goals_f', lr.goals_f,
+                'goals_a', lr.goals_a
+            ) as team_data
+        FROM season_series ss
+        JOIN league_ranks lr ON lr.comp_id = {league_id} AND lr.season_year = ss.season_year
+        JOIN teams t ON t.team_id = lr.team_id
+    ),
+    top_teams AS (
+        SELECT 
+            season_year,
+            team_data
+        FROM ranked_teams
+        WHERE row_num <= 3
+    ),
+    season_teams AS (
+        SELECT 
+            ss.season_year,
+            COALESCE(
+                json_agg(tt.team_data ORDER BY (tt.team_data->>'rank')::int),
+                '[]'::json
+            ) as teams_array
+        FROM season_series ss
+        LEFT JOIN top_teams tt ON tt.season_year = ss.season_year
+        GROUP BY ss.season_year
+    ),
+    years_aggregated AS (
+        SELECT 
+            json_object_agg(
+                season_year::text,
+                teams_array
+            ) as years_data
+        FROM season_teams
+    )
+    SELECT json_build_object(
+        'data', json_build_object(
+            'stats', json_build_object(
+                'comp', (SELECT to_json(li) FROM league_info li),
+                'years', (SELECT years_data FROM years_aggregated)
+            )
+        )
+    ) as result;
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            #print(f"Supabase raw response text: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for recent winners"
+                )
+            # Parse the response according to the actual structure
+            #return LeagueStatsResponse(data=result["data"])
+            return result
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+   
 
 

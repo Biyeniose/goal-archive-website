@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import date
 from app.models.player import Player, PlayerBasicInfo, PlayerStats
 from app.models.match import MatchInfo, MatchTeams, MatchEvents, Match, PlayerMatchStats, MatchTeamsBasic, PlayerMatchStatsDiv, BasicStats
@@ -151,6 +151,17 @@ class LeagueWinnersData(BaseModel):
     stats: TopCompsWinners
 class LeagueWinnersResponse(BaseModel):
     data: LeagueWinnersData
+
+# /leagues/:id/highest_stats
+class TeamLeagueStats(BaseModel):
+    comp: LeagueInfo
+    # Dynamic year keys with list of TeamRank as values
+    years: Dict[str, List[TeamRank]]
+class LeagueTeamStatData(BaseModel):
+    stats: TeamLeagueStats
+class LeagueTeamStatResponse(BaseModel):
+    data: LeagueTeamStatData
+
 
 # /leagues/:id/infos
 class LeagueData(BaseModel):
