@@ -4,7 +4,7 @@ from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.league import LeagueService
 from ..models.league import TeamRank
-from app.models.response import LeagueDataResponse, LeagueStatsResponse, LeagueMatchesResponse, LeagueRanksResponse, LeagueFormResponse, TopCompsWinnersResponse, LeagueWinnersResponse, LeagueTeamStatResponse
+from app.models.response import LeagueDataResponse, LeagueStatsResponse, LeagueMatchesResponse, LeagueRanksResponse, LeagueFormResponse, TopCompsWinnersResponse, LeagueWinnersResponse, LeagueTeamStatResponse, LeaguePastStatsResponse
 from app.constants import GLOBAL_YEAR
 from typing import List
 
@@ -47,17 +47,19 @@ def get_alltime_top_stats(league_id: int, age: int = Query(50, description="Maxi
     return stats
 
 # GET the highest stats (by stats) for the past 10 years
+"""
 @router.get("/{league_id}/past-top", response_model=LeagueStatsResponse)
-def get_alltime_top_stats(league_id: int, age: int = Query(50, description="Maximum age"), stat: str = Query("ga", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):
+def get_alltime_top_stats1(league_id: int, age: int = Query(50, description="Maximum age"), stat: str = Query("ga", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):
     service = LeagueService(supabase)
     stats = service.top_ga_stats_past10(league_id=league_id, stat=stat, age=age)
     if not stats:
         raise HTTPException(status_code=404, detail="Stats not found")
 
     return stats
+"""
 
 # GET the highest stats (by stats) for the past 10 years
-@router.get("/{league_id}/past-topbystat", response_model=LeagueStatsResponse)
+@router.get("/{league_id}/past-topbystat", response_model=LeaguePastStatsResponse)
 def get_alltime_top_stats(league_id: int, age: int = Query(50, description="Maximum age"), stat: str = Query("goals", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):
     service = LeagueService(supabase)
     stats = service.top_stats_past10_by_stat(league_id=league_id, stat=stat, age=age)
@@ -106,7 +108,7 @@ def get_recent_form(league_id: int, season: int = Query(GLOBAL_YEAR, description
 
 # form over a date range
 @router.get("/{league_id}/form-dates", response_model=LeagueFormResponse)
-def get_form_by_dates(league_id: int, start_date: date = Query("2025-03-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-07-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
+def get_form_by_dates(league_id: int, start_date: date = Query("2025-04-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-07-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
     # Validate date range
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="Start date must be before end date")

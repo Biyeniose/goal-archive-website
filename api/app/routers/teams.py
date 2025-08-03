@@ -61,6 +61,7 @@ def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year
         raise HTTPException(status_code=404, detail="Stats not found")
     return stats
 
+
 # GET all transfers in a year and total incoming/outgoing fees
 @router.get("/{team_id}/transfers", response_model=TeamTransfersResponse)
 def get_transfers(team_id: int, start_date: date = Query("2024-05-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-08-01", description="End date in YYYY-MM-DD format"),supabase: Client = Depends(get_supabase_client)):
@@ -87,5 +88,6 @@ def get_domestic_finishes(team_id: int, season: int = Query(GLOBAL_YEAR, descrip
     if not stats:
         raise HTTPException(status_code=404, detail="Stats not found")
     return stats
+
 
 

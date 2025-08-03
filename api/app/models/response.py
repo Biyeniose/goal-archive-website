@@ -172,7 +172,7 @@ class LeagueDataResponse(BaseModel):
     data: List[LeagueData]
 
 # /leagues/:id/stats&season=2024
-class LeagueStatsData(BaseModel):
+class LeaguePlayerStatsData(BaseModel):
     season_year: int
     player: PlayerBasicInfo
     team: Team
@@ -205,9 +205,20 @@ class LeagueStatsData(BaseModel):
     own_goals: Optional[int] = None
     stats_id: int
 class LeagueStatsContainer(BaseModel):
-    stats: List[LeagueStatsData]
+    stats: List[LeaguePlayerStatsData]
 class LeagueStatsResponse(BaseModel):
     data: LeagueStatsContainer
+
+# /leagues/:id/past-topbystat
+class LeagueStatsContainer(BaseModel):
+    comp: LeagueInfo
+    years: Dict[str, List[LeaguePlayerStatsData]]
+    #stats: List[LeaguePlayerStatsData]
+class LeaguePastStatsData(BaseModel):
+    stats: LeagueStatsContainer
+class LeaguePastStatsResponse(BaseModel):
+    data: LeaguePastStatsData
+
 
 # /leagues/:id/matches?season
 class LeagueMatches(BaseModel):

@@ -543,12 +543,25 @@ class LeagueService:
     # /leagues/{league_id}/past-stats get #1 highest stats BY STAT
     def top_stats_past10_by_stat(self, league_id: int, stat: str, age: int):
         query = f"""
-            WITH yearly_top_scorers AS (
+            WITH league_info AS (
+                SELECT 
+                    l.league_id as comp_id,
+                    l.league_name,
+                    l.country_id,
+                    l.logo_url as league_logo,
+                    l.type,
+                    ct.team_name as country,
+                    ct.logo_url as country_url
+                FROM leagues l
+                LEFT JOIN teams ct ON ct.team_id = l.country_id
+                WHERE l.league_id = {league_id}
+            ),
+            yearly_top_scorers AS (
                 SELECT 
                     ps.season_year,
                     ps.player_id,
                     ps.team_id,
-                    ps.age,  -- Added player_stats.age here
+                    ps.age,
                     ps.goals,
                     ps.assists,
                     ps.ga,
@@ -562,15 +575,20 @@ class LeagueService:
                     ps.reds,
                     ps.own_goals,
                     ps.stats_id,
-                    RANK() OVER (PARTITION BY ps.season_year ORDER BY ps.{stat} DESC) AS ga_rank
+                    DENSE_RANK() OVER (
+                        PARTITION BY ps.season_year 
+                        ORDER BY ps.{stat} DESC
+                    ) AS stat_rank
                 FROM player_stats ps
-                WHERE ps.comp_id = {league_id} AND ps.age <= {age} AND ps.season_year BETWEEN 2010 AND 2024
+                WHERE ps.comp_id = {league_id} 
+                AND ps.age <= {age} 
+                AND ps.season_year BETWEEN 2010 AND 2024
             ),
             top_players AS (
                 SELECT 
                     yts.*,
                     pl.player_name,
-                    pl.age AS player_age,  -- Renamed to distinguish from player_stats.age
+                    pl.age AS player_age,
                     pl.pic_url,
                     pl.position,
                     pl.nation1_id,
@@ -586,64 +604,79 @@ class LeagueService:
                 JOIN teams t ON yts.team_id = t.team_id
                 LEFT JOIN teams n1 ON pl.nation1_id = n1.team_id
                 LEFT JOIN teams n2 ON pl.nation2_id = n2.team_id
-                WHERE yts.ga_rank = 1
-                ORDER BY yts.season_year DESC
+                WHERE yts.stat_rank <= 2  -- Top 2 players per season
+            ),
+            season_players AS (
+                SELECT
+                    season_year,
+                    json_agg(
+                        json_build_object(
+                            'season_year', season_year,
+                            'player', json_build_object(
+                                'id', player_id,
+                                'name', player_name,
+                                'current_age', player_age,
+                                'pic_url', pic_url,
+                                'nations', json_build_object(
+                                    'nation1_id', nation1_id,
+                                    'nation1', nation1_name,
+                                    'nation1_logo', nation1_logo,
+                                    'nation2_id', nation2_id,
+                                    'nation2', nation2_name,
+                                    'nation2_logo', nation2_logo
+                                )
+                            ),
+                            'team', json_build_object(
+                                'team_id', team_id,
+                                'team_name', team_name,
+                                'logo', team_logo
+                            ),
+                            'age', age,
+                            'position', position,
+                            'ga', ga,
+                            'ga_pg', NULL,
+                            'goals', goals,
+                            'goals_pg', NULL,
+                            'assists', assists,
+                            'assists_pg', NULL,
+                            'penalty_goals', penalty_goals,
+                            'gp', gp,
+                            'minutes', minutes,
+                            'minutes_pg', NULL,
+                            'cs', cs,
+                            'pass_compl_pg', NULL,
+                            'passes_pg', NULL,
+                            'errors_pg', NULL,
+                            'shots_pg', NULL,
+                            'shots_on_target_pg', NULL,
+                            'sca_pg', NULL,
+                            'gca_pg', NULL,
+                            'take_ons_pg', NULL,
+                            'take_ons_won_pg', NULL,
+                            'goals_concede', goals_concede,
+                            'yellows', yellows,
+                            'yellows2', yellows2,
+                            'reds', reds,
+                            'own_goals', own_goals,
+                            'stats_id', stats_id
+                        )
+                    ) as players
+                FROM top_players
+                GROUP BY season_year
+            ),
+            years_data AS (
+                SELECT
+                    json_object_agg(
+                        season_year::text,
+                        players
+                    ) as years
+                FROM season_players
             )
             SELECT json_build_object(
                 'data', json_build_object(
-                    'stats', (
-                        SELECT json_agg(
-                            json_build_object(
-                                'season_year', tp.season_year,
-                                'player', json_build_object(
-                                    'id', tp.player_id,
-                                    'name', tp.player_name,
-                                    'current_age', tp.player_age,  -- Using players.age here
-                                    'pic_url', tp.pic_url,
-                                    'nations', json_build_object(
-                                        'nation1_id', tp.nation1_id,
-                                        'nation1', tp.nation1_name,
-                                        'nation1_logo', tp.nation1_logo,
-                                        'nation2_id', tp.nation2_id,
-                                        'nation2', tp.nation2_name,
-                                        'nation2_logo', tp.nation2_logo
-                                    )
-                                ),
-                                'team', json_build_object(
-                                    'team_id', tp.team_id,
-                                    'team_name', tp.team_name,
-                                    'logo', tp.team_logo
-                                ),
-                                'age', tp.age,  -- Using player_stats.age here
-                                'position', tp.position,
-                                'ga', tp.ga,
-                                'ga_pg', NULL,
-                                'goals', tp.goals,
-                                'goals_pg', NULL,
-                                'assists', tp.assists,
-                                'assists_pg', NULL,
-                                'penalty_goals', tp.penalty_goals,
-                                'gp', tp.gp,
-                                'minutes', tp.minutes,
-                                'minutes_pg', NULL,
-                                'cs', tp.cs,
-                                'pass_compl_pg', NULL,
-                                'passes_pg', NULL,
-                                'errors_pg', NULL,
-                                'shots_pg', NULL,
-                                'shots_on_target_pg', NULL,
-                                'sca_pg', NULL,
-                                'gca_pg', NULL,
-                                'take_ons_pg', NULL,
-                                'take_ons_won_pg', NULL,
-                                'goals_concede', tp.goals_concede,
-                                'yellows', tp.yellows,
-                                'yellows2', tp.yellows2,
-                                'reds', tp.reds,
-                                'own_goals', tp.own_goals,
-                                'stats_id', tp.stats_id
-                            )
-                        ) FROM top_players tp
+                    'stats', json_build_object(
+                        'comp', (SELECT to_json(li) FROM league_info li),
+                        'years', (SELECT years FROM years_data)
                     )
                 )
             ) as result;
@@ -662,8 +695,6 @@ class LeagueService:
                     status_code=404,
                     detail=f"No data found for league {league_id}"
                 )
-            # Parse the response according to the actual structure
-            #return LeagueStatsResponse(data=result["data"])
             return result
         
         except Exception as e:
