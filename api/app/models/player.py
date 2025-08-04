@@ -78,7 +78,7 @@ class PlayerStats(BaseModel):
     own_goals: Optional[int] = None
     stats_id: int
 
-class PlayerNations(BaseModel):
+class PlayerNations2(BaseModel):
     nation1_id: Optional[int]
     nation2_id: Optional[int]
     nation1: Optional[str]
@@ -91,7 +91,7 @@ class PlayerInfo(BaseModel):
     player_name: str
     full_name: Optional[str] = None
     pic_url: Optional[str] = None
-    isRetired: bool
+    isRetired: Optional[bool] = None
     curr_team_id: Optional[int]
     curr_team_name: Optional[str]
     curr_team_logo: Optional[str]
@@ -102,17 +102,17 @@ class PlayerInfo(BaseModel):
     parent_team_name: Optional[str]
     parent_team_logo: Optional[str]
     position: Optional[str]
-    dob: date
-    age: int
+    dob: Optional[date] = None
+    age: Optional[int] = None
     pob: Optional[str]
-    nations: Optional[PlayerNations] = None
-    market_value: Optional[int]
-    height: Optional[float]
-    foot: Optional[str]
-    date_joined: Optional[date]
-    contract_end: Optional[date]
-    last_extension: Optional[date]
-    parent_club_exp: Optional[date]
+    nations: Optional[PlayerNations2] = None
+    market_value: Optional[int] = None
+    height: Optional[float] = None
+    foot: Optional[str] = None
+    date_joined: Optional[date] = None
+    contract_end: Optional[date] = None
+    last_extension: Optional[date] = None
+    parent_club_exp: Optional[date] = None
     noClub: Optional[bool] = None
 
 class PlayerPageData(BaseModel):

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict
 from datetime import date
-from app.models.player import Player, PlayerBasicInfo, PlayerStats
+from app.models.player import Player, PlayerBasicInfo, PlayerStats, PlayerInfo
 from app.models.match import MatchInfo, MatchTeams, MatchEvents, Match, PlayerMatchStats, MatchTeamsBasic, PlayerMatchStatsDiv, BasicStats
 from app.models.league import LeagueInfo, TeamRank, Comp
 from app.models.team import Team, TeamInfo, Transfer, SquadPlayer
@@ -71,6 +71,13 @@ class PlayerGADistData(BaseModel):
     pens: Pens
 class PlayerGADistResponse(BaseModel):
     data: PlayerGADistData
+
+# PLAYER SEARCH
+class PlayerSearchData(BaseModel):
+    search: List[PlayerInfo]
+
+class PlayerSearchResponse(BaseModel):
+    data: PlayerSearchData
 
 # TEAM RESPONSES
 # /teams/:id/info

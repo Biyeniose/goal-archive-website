@@ -20,8 +20,129 @@ class PlayerService:
             "Content-Type": "application/json"
         }
 
-        
-    
+    def player_search(self, player_name: str):
+        try:
+            # Search players with related team data
+            result = self.supabase.table('players') \
+                .select('''
+                    player_id,
+                    player_name,
+                    full_name,
+                    pic_url,
+                    isRetired,
+                    curr_team_id,
+                    curr_number,
+                    onLoan,
+                    instagram,
+                    parent_team_id,
+                    position,
+                    dob,
+                    age,
+                    pob,
+                    nation1,
+                    nation2,
+                    nation1_id,
+                    nation2_id,
+                    market_value,
+                    height,
+                    foot,
+                    date_joined,
+                    contract_end,
+                    last_extension,
+                    parent_club_exp,
+                    noClub,
+                    curr_team:teams!curr_team_id(team_name, logo_url),
+                    parent_team:teams!parent_team_id(team_name, logo_url),
+                    nation1_team:teams!nation1_id(team_name, logo_url),
+                    nation2_team:teams!nation2_id(team_name, logo_url)
+                ''') \
+                .or_(f'player_name.ilike.%{player_name}%,full_name.ilike.%{player_name}%,player_slug.ilike.%{player_name}%') \
+                .order('isRetired', desc=False) \
+                .order('market_value', desc=True) \
+                .order('player_name') \
+                .limit(20) \
+                .execute()
+
+            if not result.data:
+                # Return empty search results in the correct format
+                return {
+                    "data": {
+                        "search": []
+                    }
+                }
+
+            # Transform the result to match PlayerSearchResponse format
+            players_data = []
+            for row in result.data:
+                # Extract team information from nested objects
+                curr_team = row.get("curr_team")
+                parent_team = row.get("parent_team")
+                nation1_team = row.get("nation1_team")
+                nation2_team = row.get("nation2_team")
+                
+                curr_team_name = curr_team.get("team_name") if curr_team else None
+                curr_team_logo = curr_team.get("logo_url") if curr_team else None
+                parent_team_name = parent_team.get("team_name") if parent_team else None
+                parent_team_logo = parent_team.get("logo_url") if parent_team else None
+                
+                # Build nations object if nations exist
+                nations = None
+                if row.get("nation1") or row.get("nation2"):
+                    nations = {
+                        "nation1_id": row.get("nation1_id"),
+                        "nation1": row.get("nation1"),
+                        "nation1_url": nation1_team.get("logo_url") if nation1_team else None,
+                        "nation2_id": row.get("nation2_id"),
+                        "nation2": row.get("nation2"),
+                        "nation2_url": nation2_team.get("logo_url") if nation2_team else None
+                    }
+
+                player_info = {
+                    "player_id": row["player_id"],
+                    "player_name": row["player_name"],
+                    "full_name": row.get("full_name"),
+                    "pic_url": row.get("pic_url"),
+                    "isRetired": row["isRetired"],
+                    "curr_team_id": row.get("curr_team_id"),
+                    "curr_team_name": curr_team_name,
+                    "curr_team_logo": curr_team_logo,
+                    "curr_number": row.get("curr_number"),
+                    "onLoan": row.get("onLoan"),
+                    "instagram": row.get("instagram"),
+                    "parent_team_id": row.get("parent_team_id"),
+                    "parent_team_name": parent_team_name,
+                    "parent_team_logo": parent_team_logo,
+                    "position": row.get("position"),
+                    "dob": row["dob"],
+                    "age": row["age"],
+                    "pob": row.get("pob"),
+                    "nations": nations,
+                    "market_value": row.get("market_value"),
+                    "height": row.get("height"),
+                    "foot": row.get("foot"),
+                    "date_joined": row.get("date_joined"),
+                    "contract_end": row.get("contract_end"),
+                    "last_extension": row.get("last_extension"),
+                    "parent_club_exp": row.get("parent_club_exp"),
+                    "noClub": row.get("noClub")
+                }
+                players_data.append(player_info)
+
+            # Format response to match PlayerSearchResponse model
+            formatted_response = {
+                "data": {
+                    "search": players_data
+                }
+            }
+
+            return formatted_response
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
     def get_player_page_data(self, player_id: int):
         try:
             query = f"""

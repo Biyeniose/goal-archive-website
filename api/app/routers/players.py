@@ -4,7 +4,7 @@ from datetime import date
 from ..dependencies import get_supabase_client
 from ..classes.player import PlayerService
 from ..models.player import PlayerPageDataResponse
-from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse, PlayerRecentGAResponse, PlayerGADistResponse
+from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse, PlayerRecentGAResponse, PlayerSearchResponse, PlayerGADistResponse
 from datetime import datetime, timedelta
 import pytz, requests, random
 from app.constants import GLOBAL_YEAR
@@ -16,6 +16,20 @@ router = APIRouter(
     #dependencies=[Depends(get_supabase_client)],
     responses={404: {"description": "Not found"}},
 )
+
+# Search player by name
+@router.get("/search", response_model=PlayerSearchResponse)
+async def get_season_stats(name: str = Query("Frank Lampard", description="Season year"),supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.player_search(player_name=name)
+
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # GET Players stats in all competitions per season
 @router.get("/{player_id}/allstats", response_model=PlayerSeasonStatsResponse)
