@@ -165,6 +165,17 @@ async def get_player_recent_ga(player_id: int, opp_team_id: int, supabase: Clien
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/{player_id}/apps/{opp_team_id}", response_model=PlayerRecentGAResponse)
+async def get_player_apps_against_team(player_id: int, opp_team_id: int, supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_recent_apps_against_team(player_id=player_id, opp_team_id=opp_team_id)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
