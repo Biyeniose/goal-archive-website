@@ -1025,7 +1025,7 @@ class PlayerService:
                 detail=f"Unexpected error: {str(e)}"
             )
 
-    def get_recent_ga_bydate(self, player_id: int, start_date: str, end_date: str):
+    def get_recent_ga_against_team(self, player_id: int, opp_team_id: int):
         query = f"""
         WITH goal_contributions AS (
             SELECT 
@@ -1042,7 +1042,10 @@ class PlayerService:
                 pms.team_id = l.team_id
             WHERE l.player_id = {player_id}
             AND (pms.goals > 0 OR pms.assists > 0)
-            AND m.match_date BETWEEN '{start_date}' AND '{end_date}'
+            AND (
+                (l.team_id = m.home_id AND m.away_id = {opp_team_id}) OR
+                (l.team_id = m.away_id AND m.home_id = {opp_team_id})
+            )
             ORDER BY m.match_date DESC
             LIMIT 25
         ),

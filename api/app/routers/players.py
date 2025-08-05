@@ -153,6 +153,20 @@ async def get_player_recent_ga(player_id: int, start_date: date = Query("2025-01
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.get("/{player_id}/ga/{opp_team_id}", response_model=PlayerRecentGAResponse)
+async def get_player_recent_ga(player_id: int, opp_team_id: int, supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_recent_ga_against_team(player_id=player_id, opp_team_id=opp_team_id)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 def get_yesterday_toronto_date():
     toronto_tz = pytz.timezone('America/Toronto')
