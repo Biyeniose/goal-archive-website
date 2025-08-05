@@ -1270,18 +1270,121 @@ class PlayerService:
         return response
 
 
-    
+    def get_player_goal_dist_bydate(self, player_id: int, start_date: str, end_date: str):
+        # 1. Fetch all goal events (which may include both goals and assists)
+        event_response = self.supabase.table('match_events') \
+            .select('*, matches!inner(match_date)') \
+            .gte('matches.match_date', start_date) \
+            .lte('matches.match_date', end_date) \
+            .eq('event_type', 'goal') \
+            .or_(f'active_player_id.eq.{player_id},passive_player_id.eq.{player_id}') \
+            .execute()
 
-    
+        goal_events = event_response.data
 
+        # Also fetch penalty goals separately (if needed)
+        penalty_response = self.supabase.table('match_events') \
+            .select('*, matches!inner(match_date)') \
+            .gte('matches.match_date', start_date) \
+            .lte('matches.match_date', end_date) \
+            .eq('event_type', 'penalty goal') \
+            .eq('active_player_id', player_id) \
+            .execute()
 
+        penalty_goals = penalty_response.data
 
+        # Combine both event sets
+        all_events = goal_events + penalty_goals
 
+        # 2. Compute totals
+        total_goals = sum(1 for e in goal_events if e['active_player_id'] == player_id)
+        total_assists = sum(1 for e in goal_events if e['passive_player_id'] == player_id)
+        total_ga = total_goals + total_assists
+        total_pens = len(penalty_goals)
 
+        # 3. Build per-team distribution
+        team_contributions = {}
+        for event in all_events:
+            team_id = event['opp_team_id']
+            if not team_id:
+                continue
 
+            if team_id not in team_contributions:
+                team_contributions[team_id] = {
+                    'goals_against': 0,
+                    'assists_against': 0,
+                    'ga_against': 0
+                }
 
+            # Count goal
+            if event['event_type'] in ['goal', 'penalty goal'] and event['active_player_id'] == player_id:
+                team_contributions[team_id]['goals_against'] += 1
+                team_contributions[team_id]['ga_against'] += 1
 
+            # Count assist (only from event_type = 'goal')
+            if event['event_type'] == 'goal' and event['passive_player_id'] == player_id:
+                team_contributions[team_id]['assists_against'] += 1
+                team_contributions[team_id]['ga_against'] += 1
 
+        # 4. Build team response list
+        team_dists = []
+        for team_id, stats in team_contributions.items():
+            team_response = self.supabase.table('teams') \
+                .select('team_id, team_name, logo_url') \
+                .eq('team_id', team_id) \
+                .single() \
+                .execute()
 
+            team_data = team_response.data
 
+            team = Team(
+                team_id=team_data['team_id'],
+                team_name=team_data['team_name'],
+                logo=team_data['logo_url']
+            )
 
+            stats_dist = StatsDist(
+                ga_against=stats['ga_against'],
+                ga_against_pct=round((stats['ga_against'] * 100.0 / total_ga), 1) if total_ga else None,
+                goals_against=stats['goals_against'],
+                goals_against_pct=round((stats['goals_against'] * 100.0 / total_goals), 1) if total_goals else None,
+                assists_against=stats['assists_against'],
+                assists_against_pct=round((stats['assists_against'] * 100.0 / total_assists), 1) if total_assists else None
+            )
+
+            team_dists.append(TeamDist(team=team, stats=stats_dist))
+
+        # Sort by most impactful teams
+        team_dists.sort(key=lambda x: x.stats.ga_against_pct or 0, reverse=True)
+
+        # 5. Build response
+        pens = Pens(
+            pen_pct=round((total_pens * 100.0 / total_goals), 1) if total_goals > 0 else None,
+            pens_scored=total_pens if total_pens > 0 else None
+        )
+
+        goal_dist_list = [GoalDist(teams=td) for td in team_dists]
+
+        # Get the season year from the start_date (assuming it's in YYYY-MM-DD format)
+        season_year = int(start_date[:4]) if start_date else None
+
+        response = PlayerGADistResponse(
+            data=PlayerGADistData(
+                info=Comp2(
+                    comp_id=9999,
+                    comp_name="All Competitions",
+                    comp_url=None,
+                    season_year=season_year
+                ),
+                total=TotalGA(
+                    goals=total_goals,
+                    assists=total_assists,
+                    ga=total_ga,
+                    pens=total_pens if total_pens > 0 else None
+                ),
+                goal_dist=goal_dist_list,
+                pens=pens
+            )
+        )
+
+        return response

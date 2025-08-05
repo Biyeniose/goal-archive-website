@@ -82,6 +82,26 @@ async def get_player_goal_dist(player_id: int, season: int = Query(GLOBAL_YEAR, 
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+# GET breakdown (teams+pens) of G/A for a season or by date range
+@router.get("/{player_id}/goal-dist-bydate", response_model=PlayerGADistResponse)
+async def get_player_goal_dist(player_id: int, start_date: date = Query("2024-11-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-03-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
+    try:
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="Start date must be before end date")
+        # Convert dates to string format for SQL
+        start_date_str = start_date.isoformat()
+        end_date_str = end_date.isoformat()
+        
+        service = PlayerService(supabase)
+        stats = service.get_player_goal_dist_bydate(player_id=player_id, start_date=start_date_str, end_date=end_date_str)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
 # GET list of all the games per season they were in xi or bench + match stats
 @router.get("/{player_id}/matches", response_model=PlayerMatchesResponse)
 async def get_player_match_statistics(player_id: int, season: int = Query(GLOBAL_YEAR, description="Season year"), supabase: Client = Depends(get_supabase_client)):
