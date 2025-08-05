@@ -582,7 +582,7 @@ class LeagueService:
                 FROM player_stats ps
                 WHERE ps.comp_id = {league_id} 
                 AND ps.age <= {age} 
-                AND ps.season_year BETWEEN 2010 AND 2024
+                AND ps.season_year BETWEEN 2000 AND 2024
             ),
             top_players AS (
                 SELECT 

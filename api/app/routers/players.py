@@ -122,6 +122,17 @@ async def get_player_recent_ga(player_id: int, supabase: Client = Depends(get_su
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# GET details of the last game where the player had a g/a
+@router.get("/{player_id}/recent-ga-bydate", response_model=PlayerRecentGAResponse)
+async def get_player_recent_ga(player_id: int, start_date: date = Query("2025-01-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-07-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_recent_ga_bydate(player_id=player_id, start_date=start_date, end_date=end_date)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def get_yesterday_toronto_date():
     toronto_tz = pytz.timezone('America/Toronto')

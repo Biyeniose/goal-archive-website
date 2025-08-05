@@ -301,7 +301,7 @@ class TeamService:
             WHERE (m.home_id = '{team_id}' OR m.away_id = '{team_id}')
             AND m.result IS NOT NULL
             ORDER BY m.match_date DESC, m.match_time DESC
-            LIMIT 4
+            LIMIT 6
         ),
         upcoming_matches AS (
             SELECT 
@@ -352,7 +352,7 @@ class TeamService:
             WHERE (m.home_id = '{team_id}' OR m.away_id = '{team_id}')
             AND m.result IS NULL
             ORDER BY m.match_date ASC, m.match_time ASC
-            LIMIT 4
+            LIMIT 6
         ),
         team_matches AS (
             SELECT teams, match_info FROM played_matches
@@ -827,7 +827,7 @@ class TeamService:
             JOIN leagues l ON lr.comp_id = l.league_id
             JOIN teams t ON lr.team_id = t.team_id
             WHERE lr.team_id = {team_id} 
-            AND lr.season_year BETWEEN {season - 10} AND {season}
+            AND lr.season_year BETWEEN {season - 25} AND {season}
             AND l.type LIKE '%Domestic League%'
             ORDER BY lr.season_year DESC
         )
