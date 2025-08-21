@@ -1025,7 +1025,7 @@ class PlayerService:
                 detail=f"Unexpected error: {str(e)}"
             )
 
-    def get_recent_ga_bydate(self, player_id: int, start_date: str, end_date: str):
+    def get_recent_apps_bydate(self, player_id: int, start_date: str, end_date: str):
         query = f"""
         WITH goal_contributions AS (
             SELECT 
@@ -1043,6 +1043,135 @@ class PlayerService:
             WHERE l.player_id = {player_id}
             -- AND (pms.goals > 0 OR pms.assists > 0)
             AND (pms.minutes is NOT NULL)
+            AND m.match_date BETWEEN '{start_date}' AND '{end_date}'
+            ORDER BY m.match_date DESC
+            LIMIT 100
+        ),
+        match_details AS (
+            SELECT 
+                json_build_object(
+                    'teams', json_build_object(
+                        'home', json_build_object(
+                            'team', json_build_object(
+                                'team_id', ht.team_id,
+                                'team_name', ht.team_name,
+                                'logo', COALESCE(ht.logo_url, NULL)
+                            ),
+                            'stats', json_build_object(
+                                'goals', COALESCE(m.home_goals, NULL),
+                                'pen_goals', COALESCE(m.pen_home_goals, NULL),
+                                'ranking', COALESCE(m.home_ranking, NULL)
+                            )
+                        ),
+                        'away', json_build_object(
+                            'team', json_build_object(
+                                'team_id', at.team_id,
+                                'team_name', at.team_name,
+                                'logo', COALESCE(at.logo_url, NULL)
+                            ),
+                            'stats', json_build_object(
+                                'goals', COALESCE(m.away_goals, NULL),
+                                'pen_goals', COALESCE(m.pen_away_goals, NULL),
+                                'ranking', COALESCE(m.away_ranking, NULL)
+                            )
+                        )
+                    ),
+                    'match_info', json_build_object(
+                        'match_id', m.match_id,
+                        'match_date', m.match_date,
+                        'date_time_utc', COALESCE(m.date_time_utc, NULL),
+                        'round', m.round,
+                        'season_year', m.season_year,
+                        'draw', m."isDraw",
+                        'et', m.extra_time,
+                        'pens', m.pens,
+                        'result', m.result,
+                        'comp_id', m.comp_id,
+                        'comp', lg.league_name,
+                        'comp_logo', COALESCE(lg.logo_url, NULL)
+                    ),
+                    'player_stats', CASE WHEN pms.id IS NOT NULL THEN
+                        json_build_object(
+                            'id', pms.id,
+                            'player_id', pms.player_id,
+                            'match_id', pms.match_id,
+                            'team_id', pms.team_id,
+                            'minutes', pms.minutes,
+                            'goals', pms.goals,
+                            'assists', pms.assists,
+                            'goals_assists', COALESCE(pms.goals_assists, NULL),
+                            'pens_made', pms.pens_made,
+                            'pens_att', pms.pens_att,
+                            'age', pms.age,
+                            'shots', pms.shots,
+                            'shots_on_target', pms.shots_on_target,
+                            'cards_yellow', pms.cards_yellow,
+                            'cards_red', pms.cards_red,
+                            'touches', pms.touches
+                        )
+                    ELSE NULL END
+                ) AS match_json
+            FROM goal_contributions gc
+            JOIN matches m ON gc.match_id = m.match_id
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            JOIN leagues lg ON m.comp_id = lg.league_id
+            LEFT JOIN player_match_stats pms ON 
+                pms.player_id = {player_id} AND
+                pms.match_id = gc.match_id AND
+                pms.team_id = gc.team_id
+            ORDER BY m.match_date DESC
+        )
+        SELECT 
+            json_build_object(
+                'data', json_build_object(
+                    'recent_ga', COALESCE(
+                        (SELECT json_agg(match_json) FROM match_details),
+                        '[]'::json
+                    )
+                )
+            ) AS result;
+        """
+        try:
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for player {player_id}"
+                )
+            
+            return result
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+    def get_recent_ga_bydate(self, player_id: int, start_date: str, end_date: str):
+        query = f"""
+        WITH goal_contributions AS (
+            SELECT 
+                l.match_id,
+                l.team_id,
+                pms.goals,
+                pms.assists,
+                m.match_date
+            FROM lineups l
+            JOIN matches m ON l.match_id = m.match_id
+            JOIN player_match_stats pms ON 
+                pms.player_id = l.player_id AND 
+                pms.match_id = l.match_id AND 
+                pms.team_id = l.team_id
+            WHERE l.player_id = {player_id}
+            AND (pms.goals > 0 OR pms.assists > 0)
+            -- AND (pms.minutes is NOT NULL)
             AND m.match_date BETWEEN '{start_date}' AND '{end_date}'
             ORDER BY m.match_date DESC
             LIMIT 100

@@ -43,7 +43,7 @@ def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year
         raise HTTPException(status_code=404, detail="Stats not found")
     return stats
 
-# GET total goals_for and goals_against per season for 10 years
+# GET ALL COMPS total goals_for and goals_against per season for 10 years
 @router.get("/{team_id}/goals_past10", response_model=LeagueMatchesResponse)
 def get_matches(team_id: int, season: int = Query(GLOBAL_YEAR, description="year"), supabase: Client = Depends(get_supabase_client)):
     service = TeamService(supabase)

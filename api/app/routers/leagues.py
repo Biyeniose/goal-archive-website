@@ -68,6 +68,16 @@ def get_alltime_top_stats(league_id: int, age: int = Query(50, description="Maxi
 
     return stats
 
+# GET TEAM's highest stats (by stats) for the past 15 years
+@router.get("/{league_id}/{team_id}/players_topbystat", response_model=LeaguePastStatsResponse)
+def get_teams_top_stats_past_years(league_id: int, team_id: int,age: int = Query(50, description="Maximum age"), stat: str = Query("goals", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):
+    service = LeagueService(supabase)
+    stats = service.top_stats_past10_by_stat(league_id=league_id, stat=stat, age=age)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+
+    return stats
+
 # GET Highest Goals Per Team and Season
 @router.get("/{league_id}/{team_id}/stats", response_model=LeagueStatsResponse)
 def get_league_stats_by_team(league_id: int, team_id: int, age: int = Query(50, description="Maximum age"), season: int = Query(2024, description="year"), all_time: bool = Query(False, description="all time"), stat: str = Query("ga", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):

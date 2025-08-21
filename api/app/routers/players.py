@@ -85,7 +85,7 @@ async def get_player_goal_dist(player_id: int, season: int = Query(GLOBAL_YEAR, 
     
 # GET breakdown (teams+pens) of G/A for a season or by date range
 @router.get("/{player_id}/goal-dist-bydate", response_model=PlayerGADistResponse)
-async def get_player_goal_dist(player_id: int, start_date: date = Query("2024-11-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-03-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
+async def get_player_goal_dist_bydate(player_id: int, start_date: date = Query("2024-08-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-07-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
     try:
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="Start date must be before end date")
@@ -147,7 +147,7 @@ async def get_player_recent_ga(player_id: int, supabase: Client = Depends(get_su
 async def get_player_recent_ga(player_id: int, start_date: date = Query("2025-01-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-07-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
     try:
         service = PlayerService(supabase)
-        stats = service.get_recent_ga_bydate(player_id=player_id, start_date=start_date, end_date=end_date)
+        stats = service.get_recent_apps_bydate(player_id=player_id, start_date=start_date, end_date=end_date)
         if not stats:
             raise HTTPException(status_code=404, detail="Stats not found")
         return stats
