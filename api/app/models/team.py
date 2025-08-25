@@ -15,6 +15,12 @@ class TeamInfo(BaseModel):
     city: Optional[str] = None
     stadium: Optional[str] = None
 
+class TeamCommonInfo(BaseModel):
+    team_id: int
+    team_name: str
+    team_url: Optional[str] = None
+    nation: Optional[str] = None
+    nation_url: Optional[str] = None
 
 class PlayerNations(BaseModel):
     nation1_id: Optional[int]
@@ -23,8 +29,6 @@ class PlayerNations(BaseModel):
     nation2: Optional[str]
     nation1_url: Optional[str]
     nation2_url: Optional[str]
-
-
 
 # Matches section models
 class MatchTeam(BaseModel):

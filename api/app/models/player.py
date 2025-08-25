@@ -149,13 +149,18 @@ class PlayerNations(BaseModel):
 
 
 class PlayerBasicInfo(BaseModel):
-    id: Optional[int] = None    # <--- CHANGE HERE
+    id: Optional[int] = None    
     name: Optional[str] = None 
     current_age: Optional[int] = None
     pic_url: Optional[str] = None
     nations: Optional[PlayerNations] = None
 
-
+class PlayerGameInfo(BaseModel):
+    player_id: Optional[int] = None
+    player_name: Optional[str] = None
+    age: Optional[int] = None
+    pic_url: Optional[str] = None
+    nations: Optional[PlayerNations] = None
 
 
 

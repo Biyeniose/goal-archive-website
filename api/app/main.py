@@ -37,4 +37,4 @@ app.include_router(matches.router)
 
 @app.get("/")
 async def read_root():
-    return {"message": "Welcome to the FastAPI app with Supabase!"}
+    return {"message": "Welcome to the Goal Archive API!"}

@@ -1,14 +1,20 @@
+from datetime import date, timedelta, datetime
 from fastapi import APIRouter, Depends, Query, HTTPException
 from supabase import Client
-from datetime import date
+import pytz, random
+from app.models.response import (
+    PlayerSeasonStatsResponse,
+    PlayerMatchesResponse,
+    PlayerRecentGAResponse,
+    PlayerSearchResponse,
+    PlayerGADistResponse,
+    PlayerCareerTeamsResponse,
+    RandomTransferResponse
+)
+from app.constants import GLOBAL_YEAR
 from ..dependencies import get_supabase_client
 from ..classes.player import PlayerService
 from ..models.player import PlayerPageDataResponse
-from app.models.response import PlayerSeasonStatsResponse, PlayerMatchesResponse, PlayerRecentGAResponse, PlayerSearchResponse, PlayerGADistResponse
-from datetime import datetime, timedelta
-import pytz, requests, random
-from app.constants import GLOBAL_YEAR
-
 
 router = APIRouter(
     prefix="/v1/players",
@@ -19,57 +25,119 @@ router = APIRouter(
 
 # Search player by name
 @router.get("/search", response_model=PlayerSearchResponse)
-async def get_season_stats(name: str = Query("Frank Lampard", description="Season year"),supabase: Client = Depends(get_supabase_client)):
+async def get_season_stats(
+    name: str = Query("Frank Lampard", description="Season year"),
+    supabase: Client = Depends(get_supabase_client)):
+    """
+    search for a player by name
+    """
     try:
         service = PlayerService(supabase)
         stats = service.player_search(player_name=name)
-
         if not stats:
             raise HTTPException(status_code=404, detail="Stats not found")
-        
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # GET Players stats in all competitions per season
 @router.get("/{player_id}/allstats", response_model=PlayerSeasonStatsResponse)
-async def get_season_stats(player_id: int, season: int = Query(GLOBAL_YEAR, description="Season year"),supabase: Client = Depends(get_supabase_client)):
+async def get_all_season_stats(
+    player_id: int,
+    season: int = Query(GLOBAL_YEAR, description="Season year"),
+    supabase: Client = Depends(get_supabase_client)):
+    """
+    get a certain player's stats in a competition
+    """
     try:
         service = PlayerService(supabase)
         stats = service.get_player_stats_all_seasons(player_id=player_id, season=season)
-
         if not stats:
             raise HTTPException(status_code=404, detail="Stats not found")
-        
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
 # GET Players career overall stats
 @router.get("/{player_id}/career", response_model=PlayerSeasonStatsResponse)
-async def get_season_stats(player_id: int,supabase: Client = Depends(get_supabase_client)):
+async def get_career_stats(
+    player_id: int,
+    supabase: Client = Depends(get_supabase_client)):
+    """
+    get a certain player's overall career stats
+    """
     try:
         service = PlayerService(supabase)
         stats = service.get_career_stats(player_id=player_id)
-
         if not stats:
             raise HTTPException(status_code=404, detail="Stats not found")
-        
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+# GET Players career teams
+@router.get("/{player_id}/career-teams", response_model=PlayerCareerTeamsResponse)
+async def get_player_teams(
+    player_id: int,
+    supabase: Client = Depends(get_supabase_client)):
+    """
+    get a certain player's career team
+    """
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_player_career_teams2(player_id=player_id)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404) without modification
+        raise
+    except Exception as e:
+        # Preserve original exception context with 'from e'
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 # GET Player Information for player page
 @router.get("/{player_id}/infos", response_model=PlayerPageDataResponse)
-async def get_player_page_data(player_id: int, supabase: Client = Depends(get_supabase_client)):
+async def get_player_page_data(
+    player_id: int,
+    supabase: Client = Depends(get_supabase_client)):
+    """
+    Get a certain player's BIO info.
+    """
     try:
         service = PlayerService(supabase)
         stats = service.get_player_page_data(player_id=player_id)
         if not stats:
             raise HTTPException(status_code=404, detail="Stats not found")
         return stats
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404) without modification
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Preserve original exception context with 'from e'
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+# GET a random player transfer
+@router.get("/rand-transfer", response_model=RandomTransferResponse)
+async def get_random_player_transfer(
+    start_date: date = Query("2022-08-01", description="Start date in YYYY-MM-DD format"),
+    end_date: date = Query("2025-09-01", description="End date in YYYY-MM-DD format"),
+    supabase: Client = Depends(get_supabase_client)):
+    """
+    Get a random transfer
+    """
+    try:
+        service = PlayerService(supabase)
+        stats = service.get_random_transfer(start_date=start_date, end_date=end_date)
+        if not stats:
+            raise HTTPException(status_code=404, detail="Stats not found")
+        return stats
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404) without modification
+        raise
+    except Exception as e:
+        # Preserve original exception context with 'from e'
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 # GET breakdown (teams+pens) of G/A for a season or by date range
 @router.get("/{player_id}/goal-dist", response_model=PlayerGADistResponse)
@@ -144,7 +212,7 @@ async def get_player_recent_ga(player_id: int, supabase: Client = Depends(get_su
 
 # GET details of the last game where the player had a g/a
 @router.get("/{player_id}/recent-ga-bydate", response_model=PlayerRecentGAResponse)
-async def get_player_recent_ga(player_id: int, start_date: date = Query("2025-01-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-07-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
+async def get_player_recent_ga_by_date(player_id: int, start_date: date = Query("2025-01-01", description="Start date in YYYY-MM-DD format"), end_date: date = Query("2025-07-01", description="End date in YYYY-MM-DD format"), supabase: Client = Depends(get_supabase_client)):
     try:
         service = PlayerService(supabase)
         stats = service.get_recent_apps_bydate(player_id=player_id, start_date=start_date, end_date=end_date)
@@ -156,7 +224,7 @@ async def get_player_recent_ga(player_id: int, start_date: date = Query("2025-01
     
 
 @router.get("/{player_id}/ga/{opp_team_id}", response_model=PlayerRecentGAResponse)
-async def get_player_recent_ga(player_id: int, opp_team_id: int, supabase: Client = Depends(get_supabase_client)):
+async def get_player_recent_ga_by_opp(player_id: int, opp_team_id: int, supabase: Client = Depends(get_supabase_client)):
     try:
         service = PlayerService(supabase)
         stats = service.get_recent_ga_against_team(player_id=player_id, opp_team_id=opp_team_id)
@@ -206,6 +274,7 @@ def parse_supabase_timestamp(timestamp_str):
         except ValueError:
             raise ValueError(f"Could not parse timestamp: {timestamp_str}")
 
+"""
 @router.get("/{player_id}/insta")
 async def get_player_instagram_stats(
     player_id: int,
@@ -279,7 +348,4 @@ async def get_player_instagram_stats(
         raise
     except Exception as e:
         return {"error": str(e)}
-
-
-
-
+"""

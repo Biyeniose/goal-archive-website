@@ -143,6 +143,7 @@ class PlayerService:
                 detail=f"Unexpected error: {str(e)}"
             )
 
+    # basic player data for player page
     def get_player_page_data(self, player_id: int):
         try:
             query = f"""
@@ -304,6 +305,258 @@ class PlayerService:
                 raise HTTPException(
                     status_code=404,
                     detail=f"No data found for"
+                )
+            return result
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+    # random player transfer
+    def get_random_transfer(self, start_date: str, end_date: str):
+        try:
+            query = f"""
+            WITH transfer_data AS (
+                SELECT
+                    tr.transfer_id,
+                    tr.player_id,
+                    p.player_name,
+                    json_build_object(
+                        'team_id', ft.team_id,
+                        'team_name', ft.team_name,
+                        'team_url', ft.logo_url,
+                        'nation', fn.team_name,
+                        'nation_url', fn.logo_url
+                    ) as from_team,
+                    json_build_object(
+                        'team_id', tt.team_id,
+                        'team_name', tt.team_name,
+                        'team_url', tt.logo_url,
+                        'nation', tn.team_name,
+                        'nation_url', tn.logo_url
+                    ) as to_team,
+                    tr."isLoan",
+                    tr.fee,
+                    tr.value,
+                    tr.date,
+                    tr.season
+                FROM transfers tr
+                LEFT JOIN players p ON tr.player_id = p.player_id
+                LEFT JOIN teams ft ON tr.from_team_id = ft.team_id
+                LEFT JOIN teams tt ON tr.to_team_id = tt.team_id
+                LEFT JOIN leagues fl ON ft.league_id = fl.league_id
+                LEFT JOIN leagues tl ON tt.league_id = tl.league_id
+                LEFT JOIN teams fn ON fl.country_id = fn.team_id
+                LEFT JOIN teams tn ON tl.country_id = tn.team_id
+                WHERE tr.date >= '{start_date}'
+                    AND tr.date <= '{end_date}'
+                    AND tr.fee is NOT null
+                    AND tr.fee >= 20000000
+                    AND tr."isLoan" is false
+                ORDER BY RANDOM()
+                LIMIT 1
+                )
+            SELECT json_build_object(
+            'data', json_build_object(
+                'transfer', (SELECT row_to_json(transfer_data) FROM transfer_data)
+            )
+            ) as result
+            """
+            
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query}
+            )
+            response.raise_for_status()
+            result = response.json() 
+            #print(f"Supabase raw response status: {response.status_code}")
+            #print(f"Supabase response: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for"
+                )
+            return result
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+
+    # player teams in career
+    def get_player_career_teams(self, player_id: int):
+        try:
+            query = f"""
+            WITH player_teams AS (
+                -- Get all unique teams the player has played for
+                SELECT DISTINCT 
+                    t.player_id,
+                    t.from_team_id as team_id
+                FROM transfers t
+                WHERE t.player_id = {player_id}
+                    AND t.from_team_id IS NOT NULL
+                
+                UNION
+                
+                SELECT DISTINCT 
+                    t.player_id,
+                    t.to_team_id as team_id
+                FROM transfers t
+                WHERE t.player_id = {player_id}
+                    AND t.to_team_id IS NOT NULL
+            ),
+            
+            player_info AS (
+                SELECT 
+                    p.player_id,
+                    p.player_name,
+                    p.age,
+                    p.pic_url,
+                    p.nation1_id,
+                    n1.team_name as nation1,
+                    n1.logo_url as nation1_logo,
+                    p.nation2_id,
+                    n2.team_name as nation2,
+                    n2.logo_url as nation2_logo
+                FROM players p
+                LEFT JOIN teams n1 ON p.nation1_id = n1.team_id
+                LEFT JOIN teams n2 ON p.nation2_id = n2.team_id
+                WHERE p.player_id = {player_id}
+            ),
+            
+            team_info AS (
+                SELECT 
+                    t.team_id,
+                    t.team_name,
+                    t.logo_url as team_url,
+                    nt.team_name as nation,
+                    nt.logo_url as nation_url
+                FROM player_teams pt
+                LEFT JOIN teams t ON pt.team_id = t.team_id
+                LEFT JOIN teams nt ON t.nation_id = nt.team_id
+                ORDER BY t.team_name
+            )
+            
+            SELECT json_build_object(
+                'data', json_build_object(
+                    'player', (SELECT row_to_json(player_info) FROM player_info LIMIT 1),
+                    'teams', (SELECT coalesce(json_agg(row_to_json(team_info)), '[]'::json) FROM team_info)
+                )
+            ) as result
+            """
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query},
+                timeout=20,
+            )
+            response.raise_for_status()
+            result = response.json() 
+            #print(f"Supabase raw response status: {response.status_code}")
+            #print(f"Supabase response: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail="No data found for"
+                )
+            return result
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error: {str(e)}"
+            )
+
+    # player teams in career2
+    def get_player_career_teams2(self, player_id: int):
+        try:
+            query = f"""
+            WITH all_player_teams AS (
+                -- Get all team associations with dates
+                SELECT 
+                    t.player_id,
+                    t.from_team_id as team_id,
+                    t.date
+                FROM transfers t
+                WHERE t.player_id = {player_id}
+                    AND t.from_team_id IS NOT NULL
+                
+                UNION ALL
+                
+                SELECT 
+                    t.player_id,
+                    t.to_team_id as team_id,
+                    t.date
+                FROM transfers t
+                WHERE t.player_id = {player_id}
+                    AND t.to_team_id IS NOT NULL
+            ),
+            
+            player_teams AS (
+                -- Get unique teams with their earliest date
+                SELECT 
+                    player_id,
+                    team_id,
+                    MIN(date) as earliest_date
+                FROM all_player_teams
+                GROUP BY player_id, team_id
+            ),
+            
+            player_info AS (
+                SELECT 
+                    p.player_id,
+                    p.player_name,
+                    p.age,
+                    p.pic_url,
+                    p.nation1_id,
+                    n1.team_name as nation1,
+                    n1.logo_url as nation1_logo,
+                    p.nation2_id,
+                    n2.team_name as nation2,
+                    n2.logo_url as nation2_logo
+                FROM players p
+                LEFT JOIN teams n1 ON p.nation1_id = n1.team_id
+                LEFT JOIN teams n2 ON p.nation2_id = n2.team_id
+                WHERE p.player_id = {player_id}
+            ),
+            
+            team_info AS (
+                SELECT 
+                    t.team_id,
+                    t.team_name,
+                    t.logo_url as team_url,
+                    nt.team_name as nation,
+                    nt.logo_url as nation_url,
+                    pt.earliest_date
+                FROM player_teams pt
+                LEFT JOIN teams t ON pt.team_id = t.team_id
+                LEFT JOIN teams nt ON t.nation_id = nt.team_id
+                ORDER BY pt.earliest_date ASC, t.team_name
+            )
+            
+            SELECT json_build_object(
+                'data', json_build_object(
+                    'player', (SELECT row_to_json(player_info) FROM player_info LIMIT 1),
+                    'teams', (SELECT coalesce(json_agg(row_to_json(team_info)), '[]'::json) FROM team_info)
+                )
+            ) as result
+            """
+            response = requests.post(
+                self.url,
+                headers=self.headers,
+                json={"sql_query": query},
+                timeout=20,
+            )
+            response.raise_for_status()
+            result = response.json() 
+            #print(f"Supabase raw response status: {response.status_code}")
+            #print(f"Supabase response: {result}")
+            if not result or not result.get("data"):
+                raise HTTPException(
+                    status_code=404,
+                    detail="No data found for"
                 )
             return result
         except Exception as e:

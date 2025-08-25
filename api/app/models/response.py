@@ -1,11 +1,10 @@
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict
 from datetime import date
-from app.models.player import Player, PlayerBasicInfo, PlayerStats, PlayerInfo
+from app.models.player import Player, PlayerBasicInfo, PlayerStats, PlayerInfo, Transfer
 from app.models.match import MatchInfo, MatchTeams, MatchEvents, Match, PlayerMatchStats, MatchTeamsBasic, PlayerMatchStatsDiv, BasicStats
 from app.models.league import LeagueInfo, TeamRank, Comp
-from app.models.team import Team, TeamInfo, Transfer, SquadPlayer
-
+from app.models.team import Team, TeamInfo, Transfer, SquadPlayer, TeamCommonInfo
 
 # PLAYER RESPONSES
 # /players/:id/allstats
@@ -78,6 +77,30 @@ class PlayerSearchData(BaseModel):
 
 class PlayerSearchResponse(BaseModel):
     data: PlayerSearchData
+
+# /players/:id/career-teams
+class PlayerCommonInfo(BaseModel):
+    player_id: Optional[int] = None
+    player_name: Optional[str] = None
+    age: Optional[int] = None
+    pic_url: Optional[str] = None
+    nation1_id: Optional[int] = None
+    nation1: Optional[str] = None
+    nation1_logo: Optional[str] = None
+    nation2_id: Optional[int] = None
+    nation2: Optional[str] = None
+    nation2_logo: Optional[str] = None
+class PlayerCareerTeamsData(BaseModel):
+    player: PlayerCommonInfo
+    teams: List[TeamCommonInfo]
+class PlayerCareerTeamsResponse(BaseModel):
+    data: PlayerCareerTeamsData
+
+# /players/rand-transfer
+class RandomTranfer(BaseModel):
+    transfer: Transfer
+class RandomTransferResponse(BaseModel):
+    data: RandomTranfer
 
 # TEAM RESPONSES
 # /teams/:id/info
