@@ -26,6 +26,18 @@ def get_league_data(league_id: int, season: int = Query(GLOBAL_YEAR, description
 
     return stats
 
+# GET Highest Stats in a League Gameweek
+"""
+@router.get("/{league_id}/{r}", response_model=LeagueStatsResponse)
+def get_top_stats_per_gw(league_id: int, season: int = Query(2024, description="year"), round: str = Query("1", description="Round of the match"), stat: str = Query("goals", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):
+    service = LeagueService(supabase)
+    stats = service.most_stats_league(league_id=league_id, season=season, stat=stat, age=age)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Stats not found")
+
+    return stats
+"""
+
 # GET Highest GA Per League and Season
 @router.get("/{league_id}/stats", response_model=LeagueStatsResponse)
 def get_top_stats(league_id: int, season: int = Query(2024, description="year"), age: int = Query(50, description="Maximum age"), stat: str = Query("ga", description="Type of Stats"), supabase: Client = Depends(get_supabase_client)):

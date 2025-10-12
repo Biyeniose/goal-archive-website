@@ -352,7 +352,7 @@ class PlayerService:
                 WHERE tr.date >= '{start_date}'
                     AND tr.date <= '{end_date}'
                     AND tr.fee is NOT null
-                    AND tr.fee >= 20000000
+                    AND tr.fee >= 30000000
                     AND tr."isLoan" is false
                 ORDER BY RANDOM()
                 LIMIT 1
