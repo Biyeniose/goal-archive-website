@@ -2,16 +2,14 @@ from fastapi import HTTPException
 from typing import List
 from pydantic import BaseModel
 from app.models.response import MatchInfoResponse
-from supabase import Client
 import requests
 from typing import Optional
 
 
 class MatchService:
-    def __init__(self, supabase_client: Client):
-        self.supabase = supabase_client
-        self.key = supabase_client.supabase_key
-        self.url = f"{supabase_client.rest_url}/rpc/execute_sql"
+    def __init__(self):
+        self.key = "supabase_client.supabase_key"
+        self.url = f"supabase_client.rest_url/rpc/execute_sql"
         self.headers = {
             "Authorization": f"Bearer {self.key}",
             "apikey": self.key,
@@ -236,38 +234,4 @@ class MatchService:
         ) as result;
         """
 
-        try:
-            # Use "query" instead of "sql_query" for the parameter name
-            response = requests.post(
-                self.url,
-                headers=self.headers,
-                json={"sql_query": query}  # Changed from "sql_query" to "query"
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            # Debug prints (keep these for troubleshooting)
-            #print(f"Supabase raw response status: {response.status_code}")
-            #print(f"Supabase raw response text: {response.text}")
-            
-            # The response structure is {"data": {...}} not a list with result[0]
-            if not result or not result.get("data"):
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No data found for match {match_id}"
-                )
-                
-            # Parse the response according to the actual structure
-            return MatchInfoResponse(data=result["data"])
-            
-        except requests.exceptions.HTTPError as http_err:
-            error_detail = response.text if hasattr(response, 'text') else str(http_err)
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Supabase error: {error_detail}"
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Unexpected error: {str(e)}"
-            )
+

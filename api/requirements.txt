@@ -4,3 +4,10 @@ supabase
 python-dotenv
 pytz
 requests
+sqlmodel
+postgrest==1.0.2
+propcache==0.3.2
+psycopg2-binary==2.9.10
+pydantic==2.11.7
+pydantic_core==2.33.2
+SQLAlchemy

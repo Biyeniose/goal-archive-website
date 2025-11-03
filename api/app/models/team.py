@@ -22,13 +22,14 @@ class TeamCommonInfo(BaseModel):
     nation: Optional[str] = None
     nation_url: Optional[str] = None
 
+
 class PlayerNations(BaseModel):
-    nation1_id: Optional[int]
-    nation2_id: Optional[int]
-    nation1: Optional[str]
-    nation2: Optional[str]
-    nation1_url: Optional[str]
-    nation2_url: Optional[str]
+    country_id: Optional[int] = None
+    country2_id: Optional[int] = None
+    country: Optional[str] = None
+    country2: Optional[str]= None
+    country_logo: Optional[str] = None
+    country2_logo: Optional[str] = None
 
 # Matches section models
 class MatchTeam(BaseModel):
