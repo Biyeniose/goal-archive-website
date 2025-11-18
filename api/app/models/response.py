@@ -989,3 +989,49 @@ class TeamH2HResponse(BaseModel):
     """Root response model"""
     data: TeamH2HData
 
+# /stats/nation-dist
+class PlayerLeagueInfo(BaseModel):
+    """Individual player information in a league"""
+    player_name: str
+    player_id: int
+    tfm_pic_url: Optional[str] = None
+    country: Optional[str] = None
+    country_id: Optional[int] = None
+    flag_url: Optional[str] = None
+    country2: Optional[str] = None
+    country2_id: Optional[int] = None
+    flag2_url: Optional[str] = None
+    team_name: str
+    team_id: int
+    logo_url: Optional[str] = None
+    age: Optional[int] = None
+    games_played: Optional[int] = None
+    minutes: Optional[int] = None
+    minutes_per_game: Optional[float] = None
+    goals: Optional[int] = None
+    assists: Optional[int] = None
+    goals_assists: Optional[int] = None
+
+
+class LeagueDistribution(BaseModel):
+    """League distribution with players"""
+    league_id: int
+    comp_name: str
+    tier_level: Optional[str] = None
+    country: Optional[str] = None
+    flag_url: Optional[str] = None
+    player_count: int
+    players: List[PlayerLeagueInfo]
+
+
+class NationDistData(BaseModel):
+    """Nation distribution data"""
+    league_dist: List[LeagueDistribution]
+
+
+class NationDistResponse(BaseModel):
+    """Root response model"""
+    data: NationDistData
+
+
+

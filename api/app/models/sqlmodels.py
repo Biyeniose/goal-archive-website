@@ -46,6 +46,16 @@ class Player(SQLModel, table=True):
     last_extension: Optional[date] = Field(default=None)
     curr_number: Optional[int] = Field(default=None)
     tfm_pic_url: Optional[str] = Field(default=None)
+    track_followers: Optional[bool] = Field(default=None)
+
+# ig followers
+class IgFollowers(SQLModel, table=True):
+    __tablename__ = "ig_followers"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    player_id: Optional[int] = Field(default=None, foreign_key="players.player_id", index=True)
+    num_followers: Optional[int] = Field(default=None)
+    updated_at: Optional[datetime] = Field(default=None)
 
 
 

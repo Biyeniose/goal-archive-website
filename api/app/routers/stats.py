@@ -1,19 +1,16 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
-from supabase import Client
-from datetime import date
-
+from datetime import date, timedelta, datetime, timezone
 from ..dependencies import DBSession
-#from ..classes.stat import StatsRanking, StatsService, LeagueStats, TeamMatches, TeamMatchesResponse
-#from app.models.response import H2HResponse, InfoMatch, LeagueFormResponse, PlayerPerformance, PlayerPerformanceData, PlayerPerformanceResponse, PlayerRecordResponse, PlayerWeeklyStats, TeamH2HResponse
-from ..models.response import TeamH2HResponse, PlayerWeeklyStats, PlayerRecordResponse, LeagueFormResponse, PlayerPerformance, PlayerPerformanceData, PlayerPerformanceResponse
+
+from ..models.stats import BestGamesResponse, PlayerSearchResponse, PlayerStatsDetailedResponse, PlayerStatsTableResponse, SeasonStatsLeadersResponse, TeamSearchResponse, InstaFollowersResponse, InstaFollowersDecreaseResponse, InstaFollowersHistoryResponse
+
+from ..models.response import NationDistResponse, TeamH2HResponse, PlayerWeeklyStats, PlayerRecordResponse, LeagueFormResponse, PlayerPerformance, PlayerPerformanceData, PlayerPerformanceResponse
 
 from typing import List, Optional, Union
 #import requests, randomz
 from sqlmodel import select
 from sqlalchemy import text
 from pydantic import BaseModel
-from sqlalchemy.orm import aliased
-
 
 router = APIRouter(
     prefix="/v1/stats",
@@ -22,51 +19,16 @@ router = APIRouter(
     #responses={404: {"description": "Not found"}},
 )
 
-# Response model
-class TeamResponse(BaseModel):
-    league_id: int
-    team_name: str
-    team_id: int
-
-
-@router.get("/{league_id}/teams", response_model=List[TeamResponse])
-async def get_teams_by_league(league_id: int, session: DBSession):
-    """Get all teams in a specific league"""
-    
-    query = text("""
-        SELECT 
-            league_id,
-            name AS team_name,
-            team_id
-        FROM teams
-        WHERE league_id = :league_id
-        ORDER BY name
-    """)
-    
-    result = session.exec(query, params={"league_id": league_id})
-    
-    # Convert to list of dicts
-    teams = [
-        {
-            "league_id": row[0],
-            "team_name": row[1],
-            "team_id": row[2]
-        }
-        for row in result
-    ]
-    
-    return teams
-
 
 # weekly performances leaders
-@router.get("/leaders/{league_id}", response_model=PlayerPerformanceResponse)
+@router.get("/weekly-leaders/{league_id}", response_model=PlayerPerformanceResponse)
 async def get_gameweek_stats_leaders(
     league_id: int,
     session: DBSession,
     league_ids: List[int] = Query([], description="List of league IDs"),
     season_year: int = Query(2025, description="Year"),
-    start_date: str = Query("2025-08-21", description="Start date in YYYY-MM-DD format"),
-    end_date: str = Query("2025-08-25", description="End date in YYYY-MM-DD format"),
+    start_date: str = Query("2025-11-07", description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query("2025-11-09", description="End date in YYYY-MM-DD format"),
     stat: str = Query("xg"),
     age: int = Query(80),
     limit: int = Query(15)
@@ -134,7 +96,7 @@ async def get_gameweek_stats_leaders(
                 AND comp.stage IN ('league', 'knockout phase')
                 AND pms.{stat} IS NOT NULL
                 AND pms.age <= :age 
-            ORDER BY pms.{stat} DESC
+            ORDER BY pms.{stat} DESC, pms.minutes DESC
             LIMIT :limit
         )
         SELECT json_build_object(
@@ -154,66 +116,6 @@ async def get_gameweek_stats_leaders(
     
     return result[0] if result else {"data": []}
 
-class SeasonStatsLeader(BaseModel):
-    player_name: str
-    player_id: int
-    position: Optional[str] = None
-    height: Optional[Union[int, float]] = None
-    age: Optional[int] = None
-    mpg: Optional[float] = None
-    mins: Optional[int] = None
-    games: Optional[int] = None
-    
-    # Goals and assists
-    goals: Optional[int] = None
-    goals_p90: Optional[float] = None
-    assists: Optional[int] = None
-    assists_p90: Optional[float] = None
-    goals_assists: Optional[int] = None
-    goals_assists_p90: Optional[float] = None
-    
-    # Passing
-    passes_completed: Optional[int] = None
-    passes_completed_p90: Optional[float] = None
-    
-    # Carries
-    progressive_carries: Optional[int] = None
-    progressive_carries_p90: Optional[float] = None
-    
-    # Shooting
-    shots: Optional[int] = None
-    shots_p90: Optional[float] = None
-    
-    # Defending
-    tackles: Optional[int] = None
-    tackles_p90: Optional[float] = None
-    blocks: Optional[int] = None
-    blocks_p90: Optional[float] = None
-    
-    # Dribbling
-    take_ons_won: Optional[int] = None
-    take_ons_won_p90: Optional[float] = None
-    
-    # Teams
-    team: Optional[str] = None
-    team_id: Optional[int] = None
-    team_logo: Optional[str] = None
-    team2: Optional[str] = None
-    team2_id: Optional[int] = None
-    team2_logo: Optional[str] = None
-    
-    # Countries
-    country: Optional[str] = None
-    country_flag: Optional[str] = None
-    country2: Optional[str] = None
-    country2_flag: Optional[str] = None
-
-    class Config:
-        extra = "allow"
-
-class SeasonStatsLeadersResponse(BaseModel):
-    data: List[SeasonStatsLeader]
-
 # get dom league player stats leaders 
 @router.get("/players-leaders/{league_id}", response_model=SeasonStatsLeadersResponse)
 async def get_season_stats_leaders(
@@ -225,11 +127,125 @@ async def get_season_stats_leaders(
     min_minutes: int = Query(450, description="Minimum minutes played"),
     max_age: int = Query(80, description="Maximum age"),
     country_id: Optional[int] = Query(None, description="Filter by country ID"),
+    min_gp: Optional[int] = Query(None, description="Minimum games played"),
     limit: int = Query(20)
 ):
     # Combine the path parameter league_id with query parameter league_ids
     all_league_ids = [league_id] + league_ids
     
+    # Determine if it's a per-90 stat to use weighted average or regular sum
+    is_per90 = stat.endswith('_p90')
+    
+    if is_per90:
+        stat_value = f"ROUND((SUM(pcs.{stat} * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2)"
+    else:
+        stat_value = f"SUM(pcs.{stat})"
+    
+    # Build country filter conditionally
+    country_filter = "AND p.country_id = :country_id" if country_id else ""
+    
+    # Build min_gp filter conditionally
+    min_gp_having = "AND SUM(pcs.games_played) >= :min_gp" if min_gp else ""
+    
+    query = text(f"""
+        WITH player_data AS (
+            SELECT 
+                json_build_object(
+                    'player_name', p.player_name,
+                    'player_id', p.player_id,
+                    'position', p.position,
+                    'height', p.height,
+                    'age', MAX(pcs.age),
+                    'mpg', ROUND(COALESCE(AVG(pcs.minutes_per_game), SUM(pcs.minutes)::numeric / NULLIF(SUM(pcs.games_played), 0))::numeric, 2),
+                    'mins', SUM(pcs.minutes),
+                    'games', SUM(pcs.games_played),
+                    '{stat}', {stat_value},
+                    'goals', SUM(pcs.goals),
+                    'goals_p90', ROUND((SUM(pcs.goals_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'assists', SUM(pcs.assists),
+                    'assists_p90', ROUND((SUM(pcs.assists_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'goals_assists', SUM(pcs.goals_assists),
+                    'goals_assists_p90', ROUND((SUM(pcs.goals_assists_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'passes_completed', SUM(pcs.passes_completed),
+                    'passes_completed_p90', ROUND((SUM(pcs.passes_completed_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'progressive_carries', SUM(pcs.progressive_carries),
+                    'progressive_carries_p90', ROUND((SUM(pcs.progressive_carries_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'shots', SUM(pcs.shots),
+                    'shots_p90', ROUND((SUM(pcs.shots_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'tackles', SUM(pcs.tackles),
+                    'tackles_p90', ROUND((SUM(pcs.tackles_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'blocks', SUM(pcs.blocks),
+                    'blocks_p90', ROUND((SUM(pcs.blocks_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'take_ons_won', SUM(pcs.take_ons_won),
+                    'take_ons_won_p90', ROUND((SUM(pcs.take_ons_won_p90 * pcs.minutes) / NULLIF(SUM(pcs.minutes), 0))::numeric, 2),
+                    'team', (ARRAY_AGG(t.name ORDER BY pcs.minutes DESC))[1],
+                    'team_id', (ARRAY_AGG(t.team_id ORDER BY pcs.minutes DESC))[1],
+                    'team_logo', (ARRAY_AGG(t.logo_url ORDER BY pcs.minutes DESC))[1],
+                    'team2', (ARRAY_AGG(t.name ORDER BY pcs.minutes DESC))[2],
+                    'team2_id', (ARRAY_AGG(t.team_id ORDER BY pcs.minutes DESC))[2],
+                    'team2_logo', (ARRAY_AGG(t.logo_url ORDER BY pcs.minutes DESC))[2],
+                    'country', c1.name,
+                    'country_flag', c1.flag_url,
+                    'country2', c2.name,
+                    'country2_flag', c2.flag_url
+                ) as player_data,
+                {stat_value} as stat_value_for_order,
+                SUM(pcs.goals_assists) as goals_assists_for_order
+            FROM player_comp_stats pcs
+            JOIN players p ON pcs.player_id = p.player_id
+            LEFT JOIN teams t ON pcs.team_id = t.team_id
+            LEFT JOIN countries c1 ON p.country_id = c1.country_id
+            LEFT JOIN countries c2 ON p.country2_id = c2.country_id
+            JOIN competitions comp ON pcs.competition_id = comp.competition_id
+            WHERE comp.league_id = ANY(:league_ids)
+                AND comp.season_year = :season_year
+                AND pcs.{stat} IS NOT NULL
+                AND pcs.{stat} > 0
+                AND pcs.minutes >= :min_minutes
+                AND pcs.age <= :max_age
+                {country_filter}
+            GROUP BY p.player_id, p.player_name, p.position, p.height, c1.name, c1.flag_url, c2.name, c2.flag_url
+            HAVING SUM(pcs.minutes) >= :min_minutes
+                {min_gp_having}
+            ORDER BY stat_value_for_order DESC, goals_assists_for_order DESC
+            LIMIT :limit
+        )
+        SELECT json_build_object(
+            'data', coalesce(json_agg(player_data), '[]'::json)
+        ) as result
+        FROM player_data
+    """)
+    
+    # Build params dict conditionally
+    params = {
+        "league_ids": all_league_ids,
+        "season_year": season_year,
+        "min_minutes": min_minutes,
+        "max_age": max_age,
+        "limit": limit
+    }
+    
+    if country_id:
+        params["country_id"] = country_id
+    
+    if min_gp:
+        params["min_gp"] = min_gp
+    
+    result = session.exec(query, params=params).first()
+    
+    return result[0] if result else {"data": []}
+
+# get stats ALL comps
+@router.get("/players-allcomps/{season_year}", response_model=SeasonStatsLeadersResponse)
+async def get_season_stats_leaders_all_comps(
+    season_year: int,
+    session: DBSession,
+    stat: str = Query("goals", description="Stat to order by (use _p90 suffix for per-90 stats)"),
+    min_minutes: int = Query(450, description="Minimum minutes played"),
+    max_age: int = Query(80, description="Maximum age"),
+    country_id: Optional[int] = Query(None, description="Filter by country ID"),
+    limit: int = Query(10)
+):
     # Determine if it's a per-90 stat to use weighted average or regular sum
     is_per90 = stat.endswith('_p90')
     
@@ -289,8 +305,7 @@ async def get_season_stats_leaders(
             LEFT JOIN countries c1 ON p.country_id = c1.country_id
             LEFT JOIN countries c2 ON p.country2_id = c2.country_id
             JOIN competitions comp ON pcs.competition_id = comp.competition_id
-            WHERE comp.league_id = ANY(:league_ids)
-                AND comp.season_year = :season_year
+            WHERE comp.season_year = :season_year
                 AND pcs.{stat} IS NOT NULL
                 AND pcs.{stat} > 0
                 AND pcs.minutes >= :min_minutes
@@ -309,7 +324,6 @@ async def get_season_stats_leaders(
     
     # Build params dict conditionally
     params = {
-        "league_ids": all_league_ids,
         "season_year": season_year,
         "min_minutes": min_minutes,
         "max_age": max_age,
@@ -322,7 +336,6 @@ async def get_season_stats_leaders(
     result = session.exec(query, params=params).first()
     
     return result[0] if result else {"data": []}
-
 
 # get player stats against a certain team
 @router.get("/players-records/{player_id}", response_model=PlayerRecordResponse)
@@ -849,22 +862,37 @@ async def get_player_record_against_team(
     return result[0] if result else {"data": {}}
 
 # get team Dom league stats between a time period
-@router.get("/ranks/{stat}/", response_model=LeagueFormResponse)
-async def get_form_by_dates(
+# other version + desc
+@router.get("/ranks/{stat}/{league_id}", response_model=LeagueFormResponse)
+async def get_form_by_dates2(
     stat: str,
+    league_id: int,
     session: DBSession,
-    comp_ids: List[int] = Query([202025], description="List of competition IDs"),
-    start_date: date = Query("2025-08-01", description="Start date in YYYY-MM-DD format"),
+    league_ids: List[int] = Query([], description="List of additional league IDs"),
+    start_date: date = Query("2025-10-01", description="Start date in YYYY-MM-DD format"),
     end_date: date = Query("2025-12-31", description="End date in YYYY-MM-DD format"),
+    max_gp: Optional[int] = Query(None, description="Maximum games per team (most recent matches)"),
+    order: str = Query("desc", description="Order direction: 'asc' or 'desc'"),
 ):
-    query = text("""
-        WITH team_matches AS (
-            -- Get ONLY matches within the date range for each team
+    # Combine the path parameter league_id with query parameter league_ids
+    all_league_ids = [league_id] + league_ids
+    
+    # Build the max_gp filter conditionally
+    max_gp_filter = ""
+    if max_gp is not None:
+        max_gp_filter = "AND match_rank <= :max_gp"
+    
+    # Determine order direction
+    order_direction = "DESC" if order.lower() == "desc" else "ASC"
+    
+    query = text(f"""
+        WITH team_matches_raw AS (
+            -- Get ALL matches within the date range for each team
             SELECT 
                 t.team_id,
                 t.name as team_name,
                 t.logo_url as logo,
-                m.match_id,  -- Added match_id for counting distinct matches
+                m.match_id,
                 m.match_date,
                 CASE 
                     WHEN t.team_id = m.home_id THEN m.home_goals
@@ -876,9 +904,9 @@ async def get_form_by_dates(
                 END as goals_against,
                 CASE 
                     WHEN (t.team_id = m.home_id AND m.home_goals > m.away_goals) OR 
-                        (t.team_id = m.away_id AND m.away_goals > m.home_goals) THEN 3  -- Win
-                    WHEN m.home_goals = m.away_goals THEN 1  -- Draw
-                    ELSE 0  -- Loss
+                        (t.team_id = m.away_id AND m.away_goals > m.home_goals) THEN 3
+                    WHEN m.home_goals = m.away_goals THEN 1
+                    ELSE 0
                 END as points,
                 CASE 
                     WHEN (t.team_id = m.home_id AND m.home_goals > m.away_goals) OR 
@@ -893,21 +921,35 @@ async def get_form_by_dates(
                     WHEN (t.team_id = m.home_id AND m.home_goals < m.away_goals) OR 
                         (t.team_id = m.away_id AND m.away_goals < m.home_goals) THEN 1
                     ELSE 0
-                END as losses
+                END as losses,
+                -- Rank matches by date (most recent first) for each team
+                ROW_NUMBER() OVER (
+                    PARTITION BY t.team_id 
+                    ORDER BY m.match_date DESC, m.match_id DESC
+                ) as match_rank
             FROM matches m
+            JOIN competitions c ON m.comp_id = c.competition_id
             JOIN teams t ON (t.team_id = m.home_id OR t.team_id = m.away_id)
-            WHERE m.comp_id = ANY(:comp_ids)
+            WHERE c.league_id = ANY(:league_ids)
             AND m.isplayed = TRUE
-            AND m.match_date BETWEEN :start_date AND :end_date  -- Strict date range
+            AND m.match_date BETWEEN :start_date AND :end_date
+        ),
+        
+        team_matches AS (
+            -- Filter to max_gp most recent matches if specified
+            SELECT *
+            FROM team_matches_raw
+            WHERE 1=1
+            {max_gp_filter}
         ),
 
         form_stats AS (
-            -- Calculate stats ONLY for matches in the date range
+            -- Calculate stats for the filtered matches
             SELECT 
                 team_id,
                 team_name,
                 logo,
-                COUNT(DISTINCT match_id) as gp,  -- Count distinct matches, not rows
+                COUNT(DISTINCT match_id) as gp,
                 SUM(points) as points,
                 SUM(wins) as wins,
                 SUM(draws) as draws,
@@ -917,7 +959,7 @@ async def get_form_by_dates(
                 SUM(goals_for) - SUM(goals_against) as gd
             FROM team_matches
             GROUP BY team_id, team_name, logo
-            HAVING COUNT(DISTINCT match_id) > 0  -- Only include teams with matches in this period
+            HAVING COUNT(DISTINCT match_id) > 0
         ),
 
         ranked_form AS (
@@ -935,14 +977,13 @@ async def get_form_by_dates(
                 gd,
                 ROW_NUMBER() OVER (
                     ORDER BY 
-                        CASE WHEN :stat = 'points' THEN points END DESC,
-                        CASE WHEN :stat = 'goals_f' THEN goals_f END DESC,
-                        CASE WHEN :stat = 'goals_a' THEN goals_a END ASC,  -- Fewer goals against is better
-                        CASE WHEN :stat = 'gd' THEN gd END DESC,
-                        CASE WHEN :stat = 'wins' THEN wins END DESC,
-                        CASE WHEN :stat = 'losses' THEN losses END ASC,  -- Fewer losses is better
-                        CASE WHEN :stat = 'draws' THEN draws END DESC,
-                        -- Default tiebreakers
+                        CASE WHEN :stat = 'points' THEN points END {order_direction},
+                        CASE WHEN :stat = 'goals_f' THEN goals_f END {order_direction},
+                        CASE WHEN :stat = 'goals_a' THEN goals_a END {order_direction},
+                        CASE WHEN :stat = 'gd' THEN gd END {order_direction},
+                        CASE WHEN :stat = 'wins' THEN wins END {order_direction},
+                        CASE WHEN :stat = 'losses' THEN losses END {order_direction},
+                        CASE WHEN :stat = 'draws' THEN draws END {order_direction},
                         gd DESC, 
                         goals_f DESC, 
                         team_name ASC
@@ -953,40 +994,48 @@ async def get_form_by_dates(
         SELECT 
             json_build_object(
                 'data', json_build_object(
-                    'form', json_agg(
-                        json_build_object(
-                            'team', json_build_object(
-                                'team_id', team_id,
-                                'team_name', team_name,
-                                'logo', logo
-                            ),
-                            'rank', rank::text,
-                            'info', NULL,
-                            'points', points,
-                            'gp', gp,
-                            'gd', gd,
-                            'wins', wins,
-                            'losses', losses,
-                            'draws', draws,
-                            'goals_f', goals_f,
-                            'goals_a', goals_a
-                        )
-                        ORDER BY rank
+                    'form', COALESCE(
+                        json_agg(
+                            json_build_object(
+                                'team', json_build_object(
+                                    'team_id', team_id,
+                                    'team_name', team_name,
+                                    'logo', logo
+                                ),
+                                'rank', rank::text,
+                                'info', NULL,
+                                'points', points,
+                                'gp', gp,
+                                'gd', gd,
+                                'wins', wins,
+                                'losses', losses,
+                                'draws', draws,
+                                'goals_f', goals_f,
+                                'goals_a', goals_a
+                            )
+                            ORDER BY rank
+                        ),
+                        '[]'::json
                     )
                 )
             ) as result
         FROM ranked_form
     """)
     
-    result = session.exec(query, params={
-        "comp_ids": comp_ids,
+    # Build params dict
+    params = {
+        "league_ids": all_league_ids,
         "start_date": start_date,
         "end_date": end_date,
         "stat": stat
-    }).first()
+    }
+    
+    if max_gp is not None:
+        params["max_gp"] = max_gp
+    
+    result = session.exec(query, params=params).first()
     
     return result[0] if result else {"data": {"form": []}}
-
 
 # h2h
 @router.get("/h2h/{team1_id}/{team2_id}", response_model=TeamH2HResponse)
@@ -1622,28 +1671,6 @@ async def get_team_h2h_ha(
         }
     }
 
-
-
-class PlayerSearchResult(BaseModel):
-    """Single player search result"""
-    player_name: str
-    player_id: int
-    tfm_pic_url: Optional[str] = None
-    country: Optional[str] = None
-    country_id: Optional[int] = None
-    country_flag: Optional[str] = None
-
-
-class PlayerSearchData(BaseModel):
-    """Player search results data"""
-    players: List[PlayerSearchResult]
-
-
-class PlayerSearchResponse(BaseModel):
-    """Root response model"""
-    data: PlayerSearchData
-
-
 # player search
 @router.get("/players/search", response_model=PlayerSearchResponse)
 async def search_players_by_name(
@@ -1690,23 +1717,6 @@ async def search_players_by_name(
     
     return {"data": {"players": players}}
 
-class TeamSearchResult(BaseModel):
-    """Single team search result"""
-    team_name: str
-    common_name: Optional[str] = None
-    team_id: int
-    logo_url: Optional[str] = None
-
-
-class TeamSearchData(BaseModel):
-    """Team search results data"""
-    teams: List[TeamSearchResult]
-
-
-class TeamSearchResponse(BaseModel):
-    """Root response model"""
-    data: TeamSearchData
-    
 # team search
 @router.get("/teams/search", response_model=TeamSearchResponse)
 async def search_teams_by_name(
@@ -1752,5 +1762,1018 @@ async def search_teams_by_name(
     ]
     
     return {"data": {"teams": teams}}
+
+# /stats/nation-dist
+@router.get("/nation-dist/{season_year}", response_model=NationDistResponse)
+async def get_nation_league_distribution(
+    season_year: int,
+    session: DBSession,
+    country_id: Optional[int] = Query(None, description="Primary country ID"),
+    country2_id: Optional[int] = Query(None, description="Secondary country ID")
+):
+    """
+    Get league distribution for players from a specific nation.
+    
+    Args:
+        season_year: Season year to analyze
+        country_id: Primary country ID (players.country_id)
+        country2_id: Secondary country ID (players.country2_id)
+    
+    Returns:
+        NationDistResponse containing league distribution and player details
+    """
+    
+    # Treat 0 as None (not provided)
+    if country_id == 0:
+        country_id = None
+    if country2_id == 0:
+        country2_id = None
+    
+    # Build WHERE clause based on provided parameters
+    country_filter = ""
+    params = {"season_year": season_year}
+    
+    # Check if at least one country is provided
+    if country_id is None and country2_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of country_id or country2_id must be provided"
+        )
+    
+    if country_id is not None and country2_id is not None:
+        # Both provided: match both
+        country_filter = "AND p.country_id = :country_id AND p.country2_id = :country2_id"
+        params["country_id"] = country_id
+        params["country2_id"] = country2_id
+    elif country_id is not None:
+        # Only country_id provided
+        country_filter = "AND p.country_id = :country_id"
+        params["country_id"] = country_id
+    elif country2_id is not None:
+        # Only country2_id provided
+        country_filter = "AND p.country2_id = :country2_id"
+        params["country2_id"] = country2_id
+    
+    query = text(f"""
+    WITH player_league_data AS (
+        SELECT 
+            l.league_id,
+            comp.name AS comp_name,
+            l.tier_level,
+            lc.name AS country,
+            lc.flag_url AS flag_url,
+            p.player_id,
+            p.player_name,
+            p.tfm_pic_url,
+            pc.name AS player_country,
+            pc.country_id AS player_country_id,
+            pc.flag_url AS player_flag_url,
+            pc2.name AS player_country2,
+            pc2.country_id AS player_country2_id,
+            pc2.flag_url AS player_flag2_url,
+            t.name AS team_name,
+            t.team_id,
+            t.logo_url,
+            pcs.age,
+            pcs.games_played,
+            pcs.minutes,
+            pcs.minutes_per_game,
+            pcs.goals,
+            pcs.assists,
+            pcs.goals_assists
+        FROM player_comp_stats pcs
+        JOIN players p ON pcs.player_id = p.player_id
+        JOIN competitions comp ON pcs.competition_id = comp.competition_id
+        JOIN leagues l ON comp.league_id = l.league_id
+        JOIN countries lc ON l.country_id = lc.country_id
+        JOIN teams t ON pcs.team_id = t.team_id
+        LEFT JOIN countries pc ON p.country_id = pc.country_id
+        LEFT JOIN countries pc2 ON p.country2_id = pc2.country_id
+        WHERE comp.season_year = :season_year
+            AND l.format = 'league'
+            AND pcs.games_played > 0
+            AND pcs.minutes IS NOT NULL
+            AND pcs.minutes > 0
+            {country_filter}
+    )
+    SELECT jsonb_build_object(
+        'data', jsonb_build_object(
+            'league_dist', COALESCE(
+                (
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'league_id', league_id,
+                            'comp_name', comp_name,
+                            'tier_level', tier_level,
+                            'country', country,
+                            'flag_url', flag_url,
+                            'player_count', player_count,
+                            'players', players
+                        )
+                        ORDER BY player_count DESC
+                    )
+                    FROM (
+                        SELECT 
+                            league_id,
+                            MAX(comp_name) AS comp_name,
+                            MAX(tier_level) AS tier_level,
+                            MAX(country) AS country,
+                            MAX(flag_url) AS flag_url,
+                            COUNT(DISTINCT player_id) AS player_count,
+                            jsonb_agg(
+                                jsonb_build_object(
+                                    'player_name', player_name,
+                                    'player_id', player_id,
+                                    'tfm_pic_url', tfm_pic_url,
+                                    'country', player_country,
+                                    'country_id', player_country_id,
+                                    'flag_url', player_flag_url,
+                                    'country2', player_country2,
+                                    'country2_id', player_country2_id,
+                                    'flag2_url', player_flag2_url,
+                                    'team_name', team_name,
+                                    'team_id', team_id,
+                                    'logo_url', logo_url,
+                                    'age', age,
+                                    'games_played', games_played,
+                                    'minutes', minutes,
+                                    'minutes_per_game', minutes_per_game,
+                                    'goals', goals,
+                                    'assists', assists,
+                                    'goals_assists', goals_assists
+                                )
+                                ORDER BY minutes DESC, goals_assists DESC
+                            ) AS players
+                        FROM player_league_data
+                        GROUP BY league_id
+                    ) league_summary
+                ),
+                '[]'::jsonb
+            )
+        )
+    ) AS result;
+    """)
+    
+    result = session.exec(query, params=params).first()
+    
+    return result[0] if result else {"data": {"league_dist": []}}
+
+# best highscoring games by dates
+@router.get("/best-games/{league_id}", response_model=BestGamesResponse)
+async def get_best_games(
+    league_id: int,
+    session: DBSession,
+    league_ids: List[int] = Query([], description="List of additional league IDs"),
+    start_date: Optional[date] = Query(None, description="Start date in YYYY-MM-DD format"),
+    end_date: Optional[date] = Query(None, description="End date in YYYY-MM-DD format"),
+    min_goals: int = Query(3, description="Minimum total goals in match"),
+    limit: int = Query(20, description="Number of matches to return")
+):
+    """
+    Get high-scoring matches from specified leagues.
+    Returns matches where total goals (home + away) exceeds min_goals threshold.
+    Defaults to November 1-7, 2025 if no dates provided.
+    """
+    # Combine the path parameter league_id with query parameter league_ids
+    all_league_ids = [league_id] + league_ids
+    
+    # Set default dates if not provided
+    if start_date is None:
+        start_date = date(2025, 11, 7)
+    if end_date is None:
+        end_date = date(2025, 11, 9)
+    
+    query = text("""
+        WITH match_data AS (
+            SELECT 
+                json_build_object(
+                    'match_id', m.match_id,
+                    'comp_id', m.comp_id,
+                    'match_date', m.match_date,
+                    'round', m.round,
+                    'season_year', comp.season_year,
+                    'result_string', CONCAT(m.home_goals, ':', m.away_goals),
+                    'total_goals', m.home_goals + m.away_goals,
+                    'comp_name', l.name,
+                    'home_team', json_build_object(
+                        'team_id', ht.team_id,
+                        'team_name', ht.name,
+                        'logo_url', ht.logo_url
+                    ),
+                    'away_team', json_build_object(
+                        'team_id', at.team_id,
+                        'team_name', at.name,
+                        'logo_url', at.logo_url
+                    )
+                ) as match_info
+            FROM matches m
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            JOIN leagues l ON comp.league_id = l.league_id
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            WHERE comp.league_id = ANY(:league_ids)
+                AND (m.home_goals + m.away_goals) > :min_goals
+                AND m.match_date >= :start_date
+                AND m.match_date <= :end_date
+            ORDER BY (m.home_goals + m.away_goals) DESC, m.match_date DESC
+            LIMIT :limit
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'matches', coalesce(json_agg(match_info), '[]'::json)
+            )
+        ) as result
+        FROM match_data
+    """)
+    
+    # Build params dict - ALWAYS include dates
+    params = {
+        "league_ids": all_league_ids,
+        "min_goals": min_goals,
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return result[0] if result else {"data": {"matches": []}}
+
+# player stats in all comps in a year + ga against
+@router.get("/player-stats-detailed/{player_id}/{season_year}", response_model=PlayerStatsDetailedResponse)
+async def get_player_stats_detailed(
+    player_id: int,
+    season_year: int,
+    session: DBSession
+):
+    query = text("""
+        WITH player_matches AS (
+            SELECT 
+                pms.player_id,
+                pms.match_id,
+                pms.team_id,
+                pms.minutes,
+                pms.goals,
+                pms.assists,
+                pms.goals_assists,
+                m.home_id,
+                m.away_id,
+                m.comp_id,
+                comp.competition_id,
+                comp.name as comp_name,
+                comp.season_year,
+                CASE 
+                    WHEN pms.team_id = m.home_id THEN m.away_id
+                    ELSE m.home_id
+                END as opponent_id
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            WHERE pms.player_id = :player_id
+                AND comp.season_year = :season_year
+        ),
+        player_teams AS (
+            SELECT DISTINCT
+                t.team_id,
+                t.name as team_name,
+                t.logo_url
+            FROM player_matches pm
+            JOIN teams t ON pm.team_id = t.team_id
+        ),
+        comp_stats AS (
+            SELECT 
+                pm.competition_id,
+                pm.comp_name,
+                pm.season_year,
+                SUM(pm.minutes) as total_minutes,
+                COUNT(*) as games_played,
+                ROUND(SUM(pm.minutes)::numeric / NULLIF(COUNT(*), 0), 2) as minutes_per_game,
+                SUM(pm.goals) as total_goals,
+                SUM(pm.assists) as total_assists,
+                SUM(pm.goals_assists) as total_goals_assists,
+                pm.opponent_id,
+                SUM(pm.goals) as opp_goals,
+                SUM(pm.assists) as opp_assists,
+                SUM(pm.goals_assists) as opp_goals_assists
+            FROM player_matches pm
+            GROUP BY pm.competition_id, pm.comp_name, pm.season_year, pm.opponent_id
+        ),
+        comp_totals AS (
+            SELECT 
+                competition_id,
+                comp_name,
+                season_year,
+                SUM(total_minutes) as total_minutes,
+                SUM(games_played) as games_played,
+                ROUND(SUM(total_minutes)::numeric / NULLIF(SUM(games_played), 0), 2) as minutes_per_game,
+                SUM(total_goals) as total_goals,
+                SUM(total_assists) as total_assists,
+                SUM(total_goals_assists) as total_goals_assists
+            FROM comp_stats
+            GROUP BY competition_id, comp_name, season_year
+        ),
+        ga_against AS (
+            SELECT 
+                cs.competition_id,
+                cs.comp_name,
+                cs.season_year,
+                json_agg(
+                    json_build_object(
+                        'team', json_build_object(
+                            'team_name', t.name,
+                            'team_id', t.team_id,
+                            'logo_url', t.logo_url
+                        ),
+                        'stats', json_build_object(
+                            'goals', cs.opp_goals,
+                            'assists', cs.opp_assists,
+                            'goals_assists', cs.opp_goals_assists
+                        )
+                    )
+                ) FILTER (WHERE cs.opp_goals > 0 OR cs.opp_assists > 0) as ga_against_teams
+            FROM comp_stats cs
+            LEFT JOIN teams t ON cs.opponent_id = t.team_id
+            GROUP BY cs.competition_id, cs.comp_name, cs.season_year
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'player', (
+                    SELECT json_build_object(
+                        'player_name', p.player_name,
+                        'player_id', p.player_id,
+                        'tfm_pic_url', p.tfm_pic_url
+                    )
+                    FROM players p
+                    WHERE p.player_id = :player_id
+                ),
+                'teams', (
+                    SELECT COALESCE(json_agg(
+                        json_build_object(
+                            'team_name', pt.team_name,
+                            'team_id', pt.team_id,
+                            'logo_url', pt.logo_url
+                        )
+                    ), '[]'::json)
+                    FROM player_teams pt
+                ),
+                'stats', COALESCE((
+                    SELECT json_agg(
+                        json_build_object(
+                            'comp', json_build_object(
+                                'comp_name', ct.comp_name,
+                                'season_year', ct.season_year
+                            ),
+                            'total_stats', json_build_object(
+                                'minutes', ct.total_minutes,
+                                'minutes_per_game', ct.minutes_per_game,
+                                'games', ct.games_played,
+                                'goals', ct.total_goals,
+                                'assists', ct.total_assists,
+                                'goals_assists', ct.total_goals_assists
+                            ),
+                            'ga_against', COALESCE(ga.ga_against_teams, '[]'::json)
+                        )
+                    )
+                    FROM comp_totals ct
+                    LEFT JOIN ga_against ga ON ct.competition_id = ga.competition_id
+                ), '[]'::json)
+            )
+        ) as result
+    """)
+    
+    params = {
+        "player_id": player_id,
+        "season_year": season_year
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return result[0] if result else {"data": {"player": None, "teams": [], "stats": []}}
+
+# show league table with player's ga
+@router.get("/player-stats-table/{player_id}/{league_id}/{season_year}", response_model=PlayerStatsTableResponse)
+async def get_player_stats_table(
+    player_id: int,
+    league_id: int,
+    season_year: int,
+    session: DBSession
+):
+    query = text("""
+        WITH league_comps AS (
+            SELECT competition_id
+            FROM competitions
+            WHERE league_id = :league_id
+                AND season_year = :season_year
+        ),
+        player_teams AS (
+            SELECT DISTINCT
+                t.team_id,
+                t.name as team_name,
+                t.logo_url
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            JOIN teams t ON pms.team_id = t.team_id
+            WHERE pms.player_id = :player_id
+                AND comp.league_id = :league_id
+                AND comp.season_year = :season_year
+        ),
+        player_stats_vs_teams AS (
+            SELECT 
+                CASE 
+                    WHEN pms.team_id = m.home_id THEN m.away_id
+                    ELSE m.home_id
+                END as opponent_id,
+                SUM(pms.goals) as goals_against,
+                SUM(pms.assists) as assists_against,
+                SUM(pms.minutes) as minutes_against,
+                ROUND(AVG(pms.minutes)::numeric, 2) as minutes_per_game_against,
+                SUM(pms.cards_yellow) as cards_yellow_against,
+                SUM(pms.cards_red) as cards_red_against,
+                SUM(pms.cards_yellow_red) as cards_yellow_red_against
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            WHERE pms.player_id = :player_id
+                AND comp.league_id = :league_id
+                AND comp.season_year = :season_year
+            GROUP BY opponent_id
+        ),
+        league_ranks AS (
+            SELECT 
+                r.team_id,
+                r.rank,
+                r.points,
+                r.wins,
+                r.draws,
+                r.losses,
+                r.gd,
+                r.gp,
+                t.name as team_name,
+                t.logo_url
+            FROM ranks r
+            JOIN teams t ON r.team_id = t.team_id
+            WHERE r.competition_id IN (SELECT competition_id FROM league_comps)
+        )
+        SELECT json_build_object(
+            'data', json_build_object(
+                'player', (
+                    SELECT json_build_object(
+                        'player_id', p.player_id,
+                        'player_name', p.player_name,
+                        'tfm_pic_url', p.tfm_pic_url
+                    )
+                    FROM players p
+                    WHERE p.player_id = :player_id
+                ),
+                'teams', (
+                    SELECT COALESCE(json_agg(
+                        json_build_object(
+                            'team_id', pt.team_id,
+                            'team_name', pt.team_name,
+                            'logo_url', pt.logo_url
+                        )
+                    ), '[]'::json)
+                    FROM player_teams pt
+                ),
+                'ranks', COALESCE((
+                    SELECT json_agg(
+                        json_build_object(
+                            'team', json_build_object(
+                                'team_id', lr.team_id,
+                                'team_name', lr.team_name,
+                                'logo_url', lr.logo_url
+                            ),
+                            'rank', lr.rank,
+                            'points', lr.points,
+                            'wins', lr.wins,
+                            'draws', lr.draws,
+                            'losses', lr.losses,
+                            'gd', lr.gd,
+                            'gp', lr.gp,
+                            'player_goals', COALESCE(pvt.goals_against, 0),
+                            'player_assists', COALESCE(pvt.assists_against, 0),
+                            'minutes', COALESCE(pvt.minutes_against, 0),
+                            'minutes_per_game', COALESCE(pvt.minutes_per_game_against, 0),
+                            'cards_yellow', COALESCE(pvt.cards_yellow_against, 0),
+                            'cards_red', COALESCE(pvt.cards_red_against, 0),
+                            'cards_yellow_red', COALESCE(pvt.cards_yellow_red_against, 0)
+                        ) ORDER BY lr.rank ASC
+                    )
+                    FROM league_ranks lr
+                    LEFT JOIN player_stats_vs_teams pvt ON lr.team_id = pvt.opponent_id
+                ), '[]'::json)
+            )
+        ) as result
+    """)
+    
+    params = {
+        "player_id": player_id,
+        "league_id": league_id,
+        "season_year": season_year
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return result[0] if result else {"data": {"player": None, "teams": [], "ranks": []}}
+
+# get ig followers + difference by each entry
+@router.get("/insta-followers/history", response_model=InstaFollowersHistoryResponse)
+async def get_insta_followers_history_by_ids(
+    session: DBSession,
+    player_ids: List[int] = Query(..., description="List of player IDs to retrieve follower data for"),
+    start_date: datetime = Query(
+        datetime(2025, 11, 11, tzinfo=timezone.utc), 
+        description="Start date to retrieve follower entries from (UTC)"
+    ),
+    end_date: datetime = Query(
+        datetime(2025, 11, 13, tzinfo=timezone.utc), 
+        description="End date to retrieve follower entries until (UTC)"
+    )
+):
+    """
+    Get all Instagram follower count entries for specific player IDs within a date range.
+    
+    Returns all follower entries between start_date and end_date for each player,
+    including the difference from the previous entry. All dates are in UTC.
+    """
+    
+    # Ensure dates are in UTC
+    if start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+    if end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
+    
+    query = text("""
+        WITH player_follower_data AS (
+            SELECT 
+                p.player_id,
+                p.player_name,
+                p.tfm_pic_url,
+                ig.num_followers,
+                ig.updated_at AT TIME ZONE 'UTC' as updated_at,
+                LAG(ig.num_followers) OVER (
+                    PARTITION BY p.player_id 
+                    ORDER BY ig.updated_at ASC
+                ) as previous_followers
+            FROM players p
+            JOIN ig_followers ig ON p.player_id = ig.player_id
+            WHERE p.player_id = ANY(:player_ids)
+                AND ig.updated_at BETWEEN :start_date AND :end_date
+        ),
+        player_follower_history AS (
+            SELECT 
+                player_id,
+                player_name,
+                tfm_pic_url,
+                json_agg(
+                    json_build_object(
+                        'num_followers', num_followers,
+                        'updated_at', updated_at,
+                        'difference', num_followers - previous_followers
+                    )
+                    ORDER BY updated_at ASC
+                ) as follower_entries
+            FROM player_follower_data
+            GROUP BY player_id, player_name, tfm_pic_url
+        )
+        SELECT 
+            json_build_object(
+                'start_date', :start_date,
+                'end_date', :end_date,
+                'players', COALESCE(json_agg(
+                    json_build_object(
+                        'player_name', player_name,
+                        'player_id', player_id,
+                        'tfm_pic_url', tfm_pic_url,
+                        'follower_entries', follower_entries
+                    )
+                ), '[]'::json)
+            ) as data
+        FROM player_follower_history
+    """)
+    
+    params = {
+        "player_ids": player_ids,
+        "start_date": start_date,
+        "end_date": end_date
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return {"data": result[0]} if result else {
+        "data": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "players": []
+        }
+    }
+
+# get followers increase
+@router.get("/insta-followers", response_model=InstaFollowersResponse)
+async def get_insta_followers_increase(
+    session: DBSession,
+    end_date: Optional[datetime] = Query(
+        None, 
+        description="End date to calculate follower increase from (defaults to 3 days ago)"
+    ),
+    limit: int = Query(10, description="Number of top players to return")
+):
+    """
+    Get players with the highest Instagram follower increase since end_date.
+    
+    Returns players ordered by follower increase (most to least).
+    """
+    # Default to 3 days ago if end_date not provided
+    if end_date is None:
+        end_date = datetime.now() - timedelta(days=3)
+    
+    # Current datetime for start_date
+    start_date = datetime.now()
+    
+    query = text("""
+        WITH follower_changes AS (
+            SELECT 
+                p.player_id,
+                p.player_name,
+                p.tfm_pic_url,
+                -- Get the most recent follower count
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_now,
+                -- Get the follower count closest to the end_date (before or at that time)
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                        AND updated_at <= :end_date
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_before
+            FROM players p
+            WHERE EXISTS (
+                SELECT 1 FROM ig_followers 
+                WHERE ig_followers.player_id = p.player_id
+            )
+        ),
+        top_players AS (
+            SELECT 
+                player_name,
+                player_id,
+                tfm_pic_url,
+                followers_now - followers_before as followers_increase,
+                followers_before,
+                followers_now
+            FROM follower_changes
+            WHERE followers_before IS NOT NULL 
+                AND followers_now IS NOT NULL
+                AND followers_now > followers_before
+            ORDER BY (followers_now - followers_before) DESC
+            LIMIT :limit
+        )
+        SELECT 
+            json_build_object(
+                'start_date', :start_date,
+                'end_date', :end_date,
+                'players', COALESCE(json_agg(
+                    json_build_object(
+                        'player_name', player_name,
+                        'player_id', player_id,
+                        'tfm_pic_url', tfm_pic_url,
+                        'followers_increase', followers_increase,
+                        'followers_before', followers_before,
+                        'followers_now', followers_now
+                    )
+                ), '[]'::json)
+            ) as data
+        FROM top_players
+    """)
+    
+    params = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return {"data": result[0]} if result else {
+        "data": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "players": []
+        }
+    }
+
+# get followers increase - by player ids
+@router.get("/insta-followers/by-ids", response_model=InstaFollowersResponse)
+async def get_insta_followers_increase_by_ids(
+    session: DBSession,
+    player_ids: List[int] = Query(..., description="List of player IDs to retrieve follower data for"),
+    end_date: Optional[datetime] = Query(
+        None, 
+        description="End date to calculate follower increase from (defaults to 3 days ago)"
+    )
+):
+    """
+    Get Instagram follower increase for specific player IDs since end_date.
+    
+    Returns players ordered by follower increase (most to least).
+    """
+    # Default to 3 days ago if end_date not provided
+    if end_date is None:
+        end_date = datetime.now() - timedelta(days=3)
+    
+    # Current datetime for start_date
+    start_date = datetime.now()
+    
+    query = text("""
+        WITH follower_changes AS (
+            SELECT 
+                p.player_id,
+                p.player_name,
+                p.tfm_pic_url,
+                -- Get the most recent follower count
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_now,
+                -- Get the follower count closest to the end_date (before or at that time)
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                        AND updated_at <= :end_date
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_before
+            FROM players p
+            WHERE p.player_id = ANY(:player_ids)
+                AND EXISTS (
+                    SELECT 1 FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id
+                )
+        ),
+        top_players AS (
+            SELECT 
+                player_name,
+                player_id,
+                tfm_pic_url,
+                followers_now - followers_before as followers_increase,
+                followers_before,
+                followers_now
+            FROM follower_changes
+            WHERE followers_before IS NOT NULL 
+                AND followers_now IS NOT NULL
+                AND followers_now > followers_before
+            ORDER BY (followers_now - followers_before) DESC
+        )
+        SELECT 
+            json_build_object(
+                'start_date', :start_date,
+                'end_date', :end_date,
+                'players', COALESCE(json_agg(
+                    json_build_object(
+                        'player_name', player_name,
+                        'player_id', player_id,
+                        'tfm_pic_url', tfm_pic_url,
+                        'followers_increase', followers_increase,
+                        'followers_before', followers_before,
+                        'followers_now', followers_now
+                    )
+                ), '[]'::json)
+            ) as data
+        FROM top_players
+    """)
+    
+    params = {
+        "player_ids": player_ids,
+        "start_date": start_date,
+        "end_date": end_date
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return {"data": result[0]} if result else {
+        "data": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "players": []
+        }
+    }
+
+# get followers decrease
+@router.get("/insta-followers-decrease", response_model=InstaFollowersDecreaseResponse)
+async def get_insta_followers_decrease(
+    session: DBSession,
+    end_date: Optional[datetime] = Query(
+        None, 
+        description="End date to calculate follower decrease from (defaults to 3 days ago)"
+    ),
+    limit: int = Query(10, description="Number of top players to return")
+):
+    """
+    Get players with the highest Instagram follower decrease since end_date.
+    
+    Returns players ordered by follower decrease (most to least).
+    """
+    # Default to 3 days ago if end_date not provided
+    if end_date is None:
+        end_date = datetime.now() - timedelta(days=3)
+    
+    # Current datetime for start_date
+    start_date = datetime.now()
+    
+    query = text("""
+        WITH follower_changes AS (
+            SELECT 
+                p.player_id,
+                p.player_name,
+                p.tfm_pic_url,
+                -- Get the most recent follower count
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_now,
+                -- Get the follower count closest to the end_date (before or at that time)
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                        AND updated_at <= :end_date
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_before
+            FROM players p
+            WHERE EXISTS (
+                SELECT 1 FROM ig_followers 
+                WHERE ig_followers.player_id = p.player_id
+            )
+        ),
+        top_players AS (
+            SELECT 
+                player_name,
+                player_id,
+                tfm_pic_url,
+                followers_before - followers_now as followers_decrease,
+                followers_before,
+                followers_now
+            FROM follower_changes
+            WHERE followers_before IS NOT NULL 
+                AND followers_now IS NOT NULL
+                AND followers_now < followers_before
+            ORDER BY (followers_before - followers_now) DESC
+            LIMIT :limit
+        )
+        SELECT 
+            json_build_object(
+                'start_date', :start_date,
+                'end_date', :end_date,
+                'players', COALESCE(json_agg(
+                    json_build_object(
+                        'player_name', player_name,
+                        'player_id', player_id,
+                        'tfm_pic_url', tfm_pic_url,
+                        'followers_decrease', followers_decrease,
+                        'followers_before', followers_before,
+                        'followers_now', followers_now
+                    )
+                ), '[]'::json)
+            ) as data
+        FROM top_players
+    """)
+    
+    params = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return {"data": result[0]} if result else {
+        "data": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "players": []
+        }
+    }
+
+# get followers decrease - by player ids
+@router.get("/insta-followers-decrease/by-ids", response_model=InstaFollowersDecreaseResponse)
+async def get_insta_followers_decrease_by_ids(
+    session: DBSession,
+    player_ids: List[int] = Query(..., description="List of player IDs to retrieve follower data for"),
+    end_date: Optional[datetime] = Query(
+        None, 
+        description="End date to calculate follower decrease from (defaults to 3 days ago)"
+    )
+):
+    """
+    Get Instagram follower decrease for specific player IDs since end_date.
+    
+    Returns players ordered by follower decrease (most to least).
+    """
+    # Default to 3 days ago if end_date not provided
+    if end_date is None:
+        end_date = datetime.now() - timedelta(days=3)
+    
+    # Current datetime for start_date
+    start_date = datetime.now()
+    
+    query = text("""
+        WITH follower_changes AS (
+            SELECT 
+                p.player_id,
+                p.player_name,
+                p.tfm_pic_url,
+                -- Get the most recent follower count
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_now,
+                -- Get the follower count closest to the end_date (before or at that time)
+                (
+                    SELECT num_followers 
+                    FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id 
+                        AND updated_at <= :end_date
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                ) as followers_before
+            FROM players p
+            WHERE p.player_id = ANY(:player_ids)
+                AND EXISTS (
+                    SELECT 1 FROM ig_followers 
+                    WHERE ig_followers.player_id = p.player_id
+                )
+        ),
+        top_players AS (
+            SELECT 
+                player_name,
+                player_id,
+                tfm_pic_url,
+                followers_before - followers_now as followers_decrease,
+                followers_before,
+                followers_now
+            FROM follower_changes
+            WHERE followers_before IS NOT NULL 
+                AND followers_now IS NOT NULL
+                AND followers_now < followers_before
+            ORDER BY (followers_before - followers_now) DESC
+        )
+        SELECT 
+            json_build_object(
+                'start_date', :start_date,
+                'end_date', :end_date,
+                'players', COALESCE(json_agg(
+                    json_build_object(
+                        'player_name', player_name,
+                        'player_id', player_id,
+                        'tfm_pic_url', tfm_pic_url,
+                        'followers_decrease', followers_decrease,
+                        'followers_before', followers_before,
+                        'followers_now', followers_now
+                    )
+                ), '[]'::json)
+            ) as data
+        FROM top_players
+    """)
+    
+    params = {
+        "player_ids": player_ids,
+        "start_date": start_date,
+        "end_date": end_date
+    }
+    
+    result = session.exec(query, params=params).first()
+    
+    return {"data": result[0]} if result else {
+        "data": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "players": []
+        }
+    }
+
+
+
+
+
+
+
 
 

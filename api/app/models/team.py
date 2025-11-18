@@ -23,6 +23,12 @@ class TeamCommonInfo(BaseModel):
     nation_url: Optional[str] = None
 
 
+# Country
+class Country(BaseModel):
+    country_name: Optional[str] = None
+    country_id: Optional[int] = None
+    country_flag: Optional[str] = None
+
 class PlayerNations(BaseModel):
     country_id: Optional[int] = None
     country2_id: Optional[int] = None

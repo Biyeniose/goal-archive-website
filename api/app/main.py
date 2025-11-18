@@ -32,19 +32,6 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-"""
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://your-nextjs-domain.com",
-        "https://amendments-urls-dir-know.trycloudflare.com"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-"""
 
 #app.include_router(teams.router)
 #app.include_router(leagues.router)

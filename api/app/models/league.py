@@ -2,6 +2,7 @@
 from typing import List, Dict, Optional
 from pydantic import BaseModel
 from app.models.team import Team
+from .team import Country
     
 
 #######################
@@ -12,6 +13,7 @@ class League(BaseModel):
 
 class TeamRank(BaseModel):
     team: Team
+    #country: Country
     rank: Optional[str]= None
     info: Optional[str] = None
     points: Optional[int] = None
