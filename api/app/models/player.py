@@ -162,6 +162,28 @@ class PlayerGameInfo(BaseModel):
     pic_url: Optional[str] = None
     nations: Optional[PlayerNations] = None
 
+###################
+class PlayerCountries(BaseModel):
+    country_id: Optional[int] = None
+    country: Optional[str] = None
+    country_flag: Optional[str] = None
+    country2_id: Optional[int] = None
+    country2: Optional[str] = None
+    country2_flag: Optional[str] = None
 
 
+class PlayerBaseInfo(BaseModel):
+    player_name: str
+    player_id: int
+    tfm_pic_url: Optional[str] = None
+    countries: PlayerCountries
+
+class PlayerSearchResult(BaseModel):
+    """Single player search result"""
+    player_name: str
+    player_id: int
+    tfm_pic_url: Optional[str] = None
+    country: Optional[str] = None
+    country_id: Optional[int] = None
+    country_flag: Optional[str] = None
 
