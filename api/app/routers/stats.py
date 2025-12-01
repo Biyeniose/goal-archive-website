@@ -1,10 +1,11 @@
+import logging
 from sqlalchemy import text
-from typing import List, Optional, Union
+from typing import Annotated, List, Optional, Union
 #import requests, randomz
 from fastapi import APIRouter, Depends, Query, HTTPException
 from datetime import date, timedelta, datetime, timezone
 
-from ..dependencies import DBSession
+from ..dependencies import DBSession, get_logger
 
 from ..models.stats import BestGamesResponse, InstaFollowersHistoryWithGamesResponse, LoanWatchResponse, PlayerSearchResponse, PlayerStatsDetailedResponse, PlayerStatsDetailedWithOppResponse, PlayerStatsTableResponse, SeasonStatsLeadersEnhancedResponse, SeasonStatsLeadersResponse, TeamSearchResponse, InstaFollowersResponse, InstaFollowersDecreaseResponse, InstaFollowersHistoryResponse
 
@@ -17,6 +18,9 @@ router = APIRouter(
     #dependencies=[Depends(get_supabase_client)],
     #responses={404: {"description": "Not found"}},
 )
+
+LoggerDep = Annotated[logging.Logger, Depends(get_logger)]
+
 # weekly performances leaders by league id + year
 @router.get("/weekly-leaders/{league_id}", response_model=PlayerPerformanceResponse)
 async def get_gameweek_stats_leaders(
@@ -3434,6 +3438,7 @@ async def get_insta_followers_increase_by_ids(
 @router.get("/insta-followers-decrease", response_model=InstaFollowersDecreaseResponse)
 async def get_insta_followers_decrease(
     session: DBSession,
+    logger: LoggerDep,
     end_date: Optional[datetime] = Query(
         None, 
         description="End date to calculate follower decrease from (defaults to 3 days ago)"
@@ -3521,6 +3526,8 @@ async def get_insta_followers_decrease(
     }
     
     result = session.exec(query, params=params).first()
+
+    logger.info('Data returned')
     
     return {"data": result[0]} if result else {
         "data": {
