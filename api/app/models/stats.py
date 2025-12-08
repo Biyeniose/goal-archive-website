@@ -59,6 +59,32 @@ class MatchWithOpponents(BaseModel):
     stats: PlayerMatchStatsInfo
     opp_defenders: List[OpponentDefender] = None
 
+class MatchInfo(BaseModel):
+    match_id: int
+    comp_id: int
+    match_date: date
+    round: str
+    season_year: int
+    result_string: str
+    total_goals: int
+    comp_name: str
+    #comp_logo: Optional[str] = None
+    home_team: TeamInfo
+    away_team: TeamInfo
+
+class InfoMatch(BaseModel):
+    match_id: int
+    comp_id: int
+    match_date: str
+    round: Optional[str] = None
+    season_year: int
+    result_string: Optional[str] = None
+    comp_name: str
+    comp_logo: Optional[str] = None
+    home_team: TeamInfo
+    away_team: TeamInfo
+    
+    
 # /stats/players-leaders/{league_id}
 class SeasonStatsLeader(BaseModel):
     player_name: str
@@ -117,6 +143,10 @@ class SeasonStatsLeader(BaseModel):
     class Config:
         extra = "allow"
 
+class PlayerMatch(BaseModel):
+    match_info: InfoMatch
+    stats: PlayerMatchStatsInfo
+
 class SeasonStatsLeaderEnhanced(BaseModel):
     player_name: str
     player_id: int
@@ -159,7 +189,9 @@ class SeasonStatsLeaderEnhanced(BaseModel):
     
     # Teams
     teams: List[TeamInfo] = []
-    ga_against: List[GAAgainst]
+    ga_against: List[GAAgainst] = []
+    # new
+    matches: List[PlayerMatch] = []
     
     # Countries
     country: Optional[str] = None
@@ -206,18 +238,7 @@ class TeamSearchResponse(BaseModel):
 # best highscoring games by dates
 
 
-class MatchInfo(BaseModel):
-    match_id: int
-    comp_id: int
-    match_date: date
-    round: str
-    season_year: int
-    result_string: str
-    total_goals: int
-    comp_name: str
-    #comp_logo: Optional[str] = None
-    home_team: TeamInfo
-    away_team: TeamInfo
+
 
 class BestGamesData(BaseModel):
     matches: List[MatchInfo]

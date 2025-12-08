@@ -237,8 +237,310 @@ async def get_season_stats_leaders(
     return result[0] if result else {"data": []}
 
 # version that uses date range instead of league
-@router.get("/league-leaders-bydate/{league_id}", response_model=SeasonStatsLeadersEnhancedResponse)
+@router.get("/stats-leaders-bydate/{league_id}", response_model=SeasonStatsLeadersEnhancedResponse)
 async def get_season_stats_leaders_by_dates(
+    league_id: int,
+    session: DBSession,
+    league_ids: List[int] = Query([], description="List of additional league IDs"),
+    start_date: date = Query(date(2025, 1, 1), description="Start date in YYYY-MM-DD format"),
+    end_date: date = Query(date(2025, 11, 26), description="End date in YYYY-MM-DD format"),
+    stat: str = Query("goals", description="Stat to order by (use _p90 suffix for per-90 stats)"),
+    min_minutes: int = Query(1, description="Minimum minutes played"),
+    country_id: Optional[int] = Query(None, description="Filter by country ID"),
+    min_gp: Optional[int] = Query(None, description="Minimum games played"),
+    limit: int = Query(20)
+):
+    # Combine the path parameter league_id with query parameter league_ids
+    all_league_ids = [league_id] + league_ids
+    
+    # Determine if it's a per-90 stat to use weighted average or regular sum
+    is_per90 = stat.endswith('_p90')
+    
+    # Map the stat name (remove _p90 suffix if present for the actual column)
+    base_stat = stat.replace('_p90', '') if is_per90 else stat
+    
+    if is_per90:
+        stat_value = f"ROUND((SUM(pms.{base_stat}) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2)"
+    else:
+        stat_value = f"SUM(pms.{base_stat})"
+    
+    # Build country filter conditionally
+    country_filter = "AND p.country_id = :country_id" if country_id else ""
+    
+    # Build min_gp filter conditionally
+    min_gp_having = "AND COUNT(DISTINCT pms.match_id) >= :min_gp" if min_gp else ""
+    
+    query = text(f"""
+        WITH player_teams AS (
+            SELECT DISTINCT
+                pms.player_id,
+                pms.team_id,
+                t.name as team_name,
+                t.logo_url,
+                SUM(pms.minutes) as total_minutes
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            LEFT JOIN teams t ON pms.team_id = t.team_id
+            WHERE comp.league_id = ANY(:league_ids)
+                AND m.match_date BETWEEN :start_date AND :end_date
+            GROUP BY pms.player_id, pms.team_id, t.name, t.logo_url
+        ),
+        player_teams_agg AS (
+            SELECT 
+                player_id,
+                json_agg(
+                    json_build_object(
+                        'team_id', team_id,
+                        'team_name', team_name,
+                        'logo_url', logo_url
+                    )
+                    ORDER BY total_minutes DESC
+                ) as teams
+            FROM player_teams
+            GROUP BY player_id
+        ),
+        player_ga_against AS (
+            SELECT 
+                pms.player_id,
+                CASE 
+                    WHEN pms.team_id = m.home_id THEN m.away_id
+                    ELSE m.home_id
+                END as opponent_team_id,
+                SUM(pms.goals) as goals,
+                SUM(pms.assists) as assists
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            WHERE comp.league_id = ANY(:league_ids)
+                AND m.match_date BETWEEN :start_date AND :end_date
+                AND pms.minutes >= 1
+            GROUP BY pms.player_id, opponent_team_id
+            HAVING SUM(pms.goals) > 0 OR SUM(pms.assists) > 0
+        ),
+        player_ga_against_agg AS (
+            SELECT 
+                pga.player_id,
+                json_agg(
+                    json_build_object(
+                        'team', json_build_object(
+                            'team_id', t.team_id,
+                            'team_name', t.name,
+                            'logo_url', t.logo_url
+                        ),
+                        'stats', json_build_object(
+                            'goals', pga.goals,
+                            'assists', pga.assists,
+                            'goals_assists', pga.goals + pga.assists
+                        )
+                    )
+                    ORDER BY (pga.goals + pga.assists) DESC, pga.goals DESC
+                ) as ga_against
+            FROM player_ga_against pga
+            LEFT JOIN teams t ON pga.opponent_team_id = t.team_id
+            GROUP BY pga.player_id
+        ),
+        player_matches AS (
+            SELECT 
+                pms.player_id,
+                pms.match_id,
+                m.comp_id,
+                m.match_date,
+                m.round,
+                comp.season_year,
+                m.result_string,
+                comp.name as comp_name,
+                NULL as comp_logo,
+                json_build_object(
+                    'team_id', ht.team_id,
+                    'team_name', ht.name,
+                    'logo_url', ht.logo_url
+                ) as home_team,
+                json_build_object(
+                    'team_id', at.team_id,
+                    'team_name', at.name,
+                    'logo_url', at.logo_url
+                ) as away_team,
+                json_build_object(
+                    'team_id', pt.team_id,
+                    'team_name', pt.name,
+                    'logo_url', pt.logo_url
+                ) as player_team,
+                pms.position,
+                pms.goals,
+                pms.assists,
+                pms.shots,
+                pms.sca,
+                pms.xg,
+                pms.xg_assist
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            LEFT JOIN teams ht ON m.home_id = ht.team_id
+            LEFT JOIN teams at ON m.away_id = at.team_id
+            LEFT JOIN teams pt ON pms.team_id = pt.team_id
+            WHERE comp.league_id = ANY(:league_ids)
+                AND m.match_date BETWEEN :start_date AND :end_date
+                AND pms.minutes >= 1
+        ),
+        player_matches_agg AS (
+            SELECT 
+                player_id,
+                json_agg(
+                    json_build_object(
+                        'match_info', json_build_object(
+                            'match_id', match_id,
+                            'comp_id', comp_id,
+                            'match_date', match_date,
+                            'round', round,
+                            'season_year', season_year,
+                            'result_string', result_string,
+                            'comp_name', comp_name,
+                            'comp_logo', comp_logo,
+                            'home_team', home_team,
+                            'away_team', away_team
+                        ),
+                        'stats', json_build_object(
+                            'team', player_team,
+                            'position', position,
+                            'goals', goals,
+                            'assists', assists,
+                            'shots', shots,
+                            'sca', sca,
+                            'xg', xg,
+                            'xg_assist', xg_assist
+                        )
+                    )
+                    ORDER BY match_date DESC
+                ) as matches
+            FROM player_matches
+            GROUP BY player_id
+        ),
+        player_data_base AS (
+            SELECT 
+                p.player_id,
+                p.player_name,
+                p.position,
+                p.height,
+                MAX(pms.age) as age,
+                ROUND((SUM(pms.minutes)::numeric / NULLIF(COUNT(DISTINCT pms.match_id), 0))::numeric, 2) as mpg,
+                SUM(pms.minutes) as mins,
+                COUNT(DISTINCT pms.match_id) as games,
+                {stat_value} as stat_value,
+                SUM(pms.goals) as goals,
+                ROUND((SUM(pms.goals) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as goals_p90,
+                SUM(pms.assists) as assists,
+                ROUND((SUM(pms.assists) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as assists_p90,
+                SUM(pms.goals_assists) as goals_assists,
+                ROUND((SUM(pms.goals_assists) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as goals_assists_p90,
+                SUM(pms.passes_completed) as passes_completed,
+                ROUND((SUM(pms.passes_completed) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as passes_completed_p90,
+                SUM(pms.progressive_carries) as progressive_carries,
+                ROUND((SUM(pms.progressive_carries) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as progressive_carries_p90,
+                SUM(pms.shots) as shots,
+                ROUND((SUM(pms.shots) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as shots_p90,
+                SUM(pms.tackles) as tackles,
+                ROUND((SUM(pms.tackles) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as tackles_p90,
+                SUM(pms.blocks) as blocks,
+                ROUND((SUM(pms.blocks) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as blocks_p90,
+                SUM(pms.take_ons_won) as take_ons_won,
+                ROUND((SUM(pms.take_ons_won) / (SUM(pms.minutes)::numeric / 90.0))::numeric, 2) as take_ons_won_p90,
+                c1.name as country,
+                c1.flag_url as country_flag,
+                c2.name as country2,
+                c2.flag_url as country2_flag,
+                {stat_value} as stat_value_for_order,
+                SUM(pms.goals_assists) as goals_assists_for_order
+            FROM player_match_stats pms
+            JOIN players p ON pms.player_id = p.player_id
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            LEFT JOIN countries c1 ON p.country_id = c1.country_id
+            LEFT JOIN countries c2 ON p.country2_id = c2.country_id
+            WHERE comp.league_id = ANY(:league_ids)
+                AND m.match_date BETWEEN :start_date AND :end_date
+                AND pms.minutes >= 1
+                {country_filter}
+            GROUP BY p.player_id, p.player_name, p.position, p.height, c1.name, c1.flag_url, c2.name, c2.flag_url
+            HAVING SUM(pms.minutes) >= :min_minutes
+                AND {stat_value} > 0
+                {min_gp_having}
+        ),
+        player_data AS (
+            SELECT 
+                json_build_object(
+                    'player_name', pdb.player_name,
+                    'player_id', pdb.player_id,
+                    'position', pdb.position,
+                    'height', pdb.height,
+                    'age', pdb.age,
+                    'mpg', pdb.mpg,
+                    'mins', pdb.mins,
+                    'games', pdb.games,
+                    '{stat}', pdb.stat_value,
+                    'goals', pdb.goals,
+                    'goals_p90', pdb.goals_p90,
+                    'assists', pdb.assists,
+                    'assists_p90', pdb.assists_p90,
+                    'goals_assists', pdb.goals_assists,
+                    'goals_assists_p90', pdb.goals_assists_p90,
+                    'passes_completed', pdb.passes_completed,
+                    'passes_completed_p90', pdb.passes_completed_p90,
+                    'progressive_carries', pdb.progressive_carries,
+                    'progressive_carries_p90', pdb.progressive_carries_p90,
+                    'shots', pdb.shots,
+                    'shots_p90', pdb.shots_p90,
+                    'tackles', pdb.tackles,
+                    'tackles_p90', pdb.tackles_p90,
+                    'blocks', pdb.blocks,
+                    'blocks_p90', pdb.blocks_p90,
+                    'take_ons_won', pdb.take_ons_won,
+                    'take_ons_won_p90', pdb.take_ons_won_p90,
+                    'teams', COALESCE(pta.teams, '[]'::json),
+                    'ga_against', COALESCE(pgaa.ga_against, '[]'::json),
+                    'matches', COALESCE(pma.matches, '[]'::json),
+                    'country', pdb.country,
+                    'country_flag', pdb.country_flag,
+                    'country2', pdb.country2,
+                    'country2_flag', pdb.country2_flag
+                ) as player_data,
+                pdb.stat_value_for_order,
+                pdb.goals_assists_for_order
+            FROM player_data_base pdb
+            LEFT JOIN player_teams_agg pta ON pdb.player_id = pta.player_id
+            LEFT JOIN player_ga_against_agg pgaa ON pdb.player_id = pgaa.player_id
+            LEFT JOIN player_matches_agg pma ON pdb.player_id = pma.player_id
+            ORDER BY pdb.stat_value_for_order DESC, pdb.goals_assists_for_order DESC
+            LIMIT :limit
+        )
+        SELECT json_build_object(
+            'data', coalesce(json_agg(player_data), '[]'::json)
+        ) as result
+        FROM player_data
+    """)
+    
+    # Build params dict conditionally (removed max_age)
+    params = {
+        "league_ids": all_league_ids,
+        "start_date": start_date,
+        "end_date": end_date,
+        "min_minutes": min_minutes,
+        "limit": limit
+    }
+    
+    if country_id:
+        params["country_id"] = country_id
+    
+    if min_gp:
+        params["min_gp"] = min_gp
+    
+    result = session.exec(query, params=params).first()
+    
+    return result[0] if result else {"data": []}
+
+# version that uses date range instead of league
+@router.get("/league-leaders-bydate-ga/{league_id}", response_model=SeasonStatsLeadersEnhancedResponse)
+async def get_season_stats_leaders_by_dates_ga(
     league_id: int,
     session: DBSession,
     league_ids: List[int] = Query([], description="List of additional league IDs"),
@@ -3232,7 +3534,6 @@ async def get_insta_followers_history_with_games(
             "players": []
         }
     }
-
 
 # get followers increase
 @router.get("/insta-followers", response_model=InstaFollowersResponse)
