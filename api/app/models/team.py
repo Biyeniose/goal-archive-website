@@ -135,7 +135,7 @@ class TeamBasicInfo(BaseModel):
 class Team(BaseModel):
     team_id: int
     team_name: str
-    logo: Optional[str] = None
+    logo_url: Optional[str] = None
 
 
 

@@ -292,8 +292,18 @@ class LoanWatchResponse(BaseModel):
     data: List[LoanWatchData]
 
 # /stats/player-stats-table/{player_id}/{league_id}/{season_year}
+class TeamData(BaseModel):
+    team_id: int
+    team_name: str
+    logo_url: Optional[str] = None
+    league_id: Optional[int] = None
+    tier_level: Optional[str] = None
+    country_name: Optional[str] = None
+    country_flag: Optional[str] = None
+    country_id: Optional[int] = None
+    
 class TeamRankWithPlayerStats(BaseModel):
-    team: TeamInfo
+    team: TeamData
     rank: int
     points: int
     wins: int
@@ -308,11 +318,13 @@ class TeamRankWithPlayerStats(BaseModel):
     cards_yellow: int
     cards_red: int
     cards_yellow_red: int
+    played: bool
 
 class PlayerStatsTableData(BaseModel):
     player: PlayerInfo
     teams: List[TeamInfo]
     ranks: List[TeamRankWithPlayerStats]
+    other_ranks: List[TeamRankWithPlayerStats]
 
 class PlayerStatsTableResponse(BaseModel):
     data: PlayerStatsTableData
@@ -378,11 +390,14 @@ class InstaFollowersHistoryResponse(BaseModel):
 class FollowersMatchInfo(BaseModel):
     match_id: int
     comp_id: int
+    comp_logo: Optional[str] = None
     match_date: date
     match_time_utc: Optional[datetime] = None
     round: Optional[str] = None
     season_year: int
     result_string: Optional[str] = None
+    home_goals: Optional[int] = None
+    away_goals: Optional[int] = None
     outcome: Optional[str] = None
     comp_name: str
     home_team: TeamInfo

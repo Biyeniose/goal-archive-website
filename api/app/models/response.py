@@ -1,3 +1,4 @@
+#from turtle import home
 from pydantic import BaseModel, HttpUrl, AwareDatetime, Field
 from typing import List, Optional, Dict, Any
 from decimal import Decimal
@@ -465,8 +466,9 @@ class PlayerWeeklyStats(BaseModel):
 class PlayerPerformance(BaseModel):
     player_id: int
     player_name: str
-    age: Optional[int]
-    position: Optional[str]
+    pixel_pic_url: Optional[str] = None    
+    age: Optional[int] = None
+    position: Optional[str] = None
     nations: PlayerNations
     team: Team
     stats: PlayerWeeklyStats
@@ -481,7 +483,11 @@ class InfoMatch(BaseModel):
     comp_name: str
     comp_logo: Optional[str] = None
     home_team: Team
+    home_goals: Optional[int] = None
+    pen_home_goals: Optional[int] = None
     away_team: Team
+    away_goals: Optional[int] = None
+    pen_away_goals: Optional[int] = None
 
 
 class PlayerPerformanceData(BaseModel):

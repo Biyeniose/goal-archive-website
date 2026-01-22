@@ -182,6 +182,7 @@ class PlayerSearchResult(BaseModel):
     """Single player search result"""
     player_name: str
     player_id: int
+    age: Optional[int] = None
     tfm_pic_url: Optional[str] = None
     country: Optional[str] = None
     country_id: Optional[int] = None

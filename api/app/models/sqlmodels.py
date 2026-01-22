@@ -46,6 +46,8 @@ class Player(SQLModel, table=True):
     last_extension: Optional[date] = Field(default=None)
     curr_number: Optional[int] = Field(default=None)
     tfm_pic_url: Optional[str] = Field(default=None)
+    pic_url: Optional[str] = Field(default=None)
+    pixel_pic_url: Optional[str] = Field(default=None)
     track_followers: Optional[bool] = Field(default=None)
 
 # ig followers
@@ -97,9 +99,7 @@ class Competition(SQLModel, table=True):
     season_year: Optional[int] = Field(default=None)  # smallint maps to int
     stage_order: Optional[int] = Field(default=None)  # smallint maps to int
     scrape_league_id: Optional[int] = Field(default=None, foreign_key="scraping_leagues.id")
-    tfm_url: Optional[str] = Field(default=None)
-    fbref_url: Optional[str] = Field(default=None)
-    fotmob_url: Optional[str] = Field(default=None)
+    logo_url: Optional[str] = Field(default=None)
 
 
 # scraping_leagues tables
