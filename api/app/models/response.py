@@ -995,6 +995,27 @@ class TeamH2HResponse(BaseModel):
     """Root response model"""
     data: TeamH2HData
 
+class CompStats(BaseModel):
+    games_played: Optional[int] = None
+    minutes: Optional[int] = None
+    minutes_per_game: Optional[float] = None
+    goals: Optional[int] = None
+    goals_p90: Optional[float] = None
+    assists: Optional[int] = None
+    assists_p90: Optional[float] = None
+    goals_assists: Optional[int] = None
+    goals_assists_p90: Optional[float] = None
+    clean_sheets: Optional[int] = None
+    clean_sheets_p90: Optional[float] = None
+    goals_conceded: Optional[int] = None
+    goals_conceded_p90: Optional[float] = None
+    cards_yellow: Optional[int] = None
+    cards_red: Optional[int] = None
+    second_yellows: Optional[int] = None
+    
+    
+    
+    
 # /stats/nation-dist
 class PlayerLeagueInfo(BaseModel):
     """Individual player information in a league"""
@@ -1007,22 +1028,22 @@ class PlayerLeagueInfo(BaseModel):
     country2: Optional[str] = None
     country2_id: Optional[int] = None
     flag2_url: Optional[str] = None
-    team_name: str
-    team_id: int
+    team_name: Optional[str] = None
+    common_name: Optional[str] = None
     logo_url: Optional[str] = None
+    pixel_pic_url: Optional[str] = None
+    position: Optional[str] = None
+    other_positions: Optional[List[str]] = Field(default_factory=list)
     age: Optional[int] = None
-    games_played: Optional[int] = None
-    minutes: Optional[int] = None
-    minutes_per_game: Optional[float] = None
-    goals: Optional[int] = None
-    assists: Optional[int] = None
-    goals_assists: Optional[int] = None
+    team_id: int
+    stats: CompStats
+    
 
 
 class LeagueDistribution(BaseModel):
     """League distribution with players"""
     league_id: int
-    comp_name: str
+    comp_name: Optional[str] = None
     tier_level: Optional[str] = None
     country: Optional[str] = None
     flag_url: Optional[str] = None

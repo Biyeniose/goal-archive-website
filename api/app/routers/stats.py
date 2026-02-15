@@ -2303,7 +2303,8 @@ async def get_nation_league_distribution(
     season_year: int,
     session: DBSession,
     country_id: Optional[int] = Query(None, description="Primary country ID"),
-    country2_id: Optional[int] = Query(None, description="Secondary country ID")
+    country2_id: Optional[int] = Query(None, description="Secondary country ID"),
+    all_comps: Optional[bool] = Query(False, description="Include all competitions")
 ):
     """
     Get league distribution for players from a specific nation.
@@ -2312,7 +2313,6 @@ async def get_nation_league_distribution(
         season_year: Season year to analyze
         country_id: Primary country ID (players.country_id)
         country2_id: Secondary country ID (players.country2_id)
-    
     Returns:
         NationDistResponse containing league distribution and player details
     """
@@ -2348,9 +2348,202 @@ async def get_nation_league_distribution(
         country_filter = "AND p.country2_id = :country2_id"
         params["country2_id"] = country2_id
     
-    query = text(f"""
+    # Build the query based on all_comps parameter
+    if all_comps:
+        # Aggregate all competitions for each player+team, but group by domestic leagues only
+        query = text(f"""
+    WITH all_player_stats AS (
+        -- Aggregate stats from ALL competitions for each player+team
+        SELECT
+            p.player_id,
+            p.player_name,
+            p.tfm_pic_url,
+            p.pixel_pic_url,
+            p.position,
+            p.other_positions,
+            pc.name AS player_country,
+            pc.country_id AS player_country_id,
+            pc.flag_url AS player_flag_url,
+            pc2.name AS player_country2,
+            pc2.country_id AS player_country2_id,
+            pc2.flag_url AS player_flag2_url,
+            pcs.team_id,
+            MAX(pcs.age) as age,
+            NULLIF(SUM(COALESCE(pcs.games_played, 0)), 0) as games_played,
+            NULLIF(SUM(COALESCE(pcs.minutes, 0)), 0) as minutes,
+            CASE
+                WHEN SUM(COALESCE(pcs.games_played, 0)) > 0 AND SUM(COALESCE(pcs.minutes, 0)) > 0
+                THEN ROUND((SUM(COALESCE(pcs.minutes, 0))::numeric / SUM(COALESCE(pcs.games_played, 0)))::numeric, 2)
+                ELSE NULL
+            END AS minutes_per_game,
+            NULLIF(SUM(COALESCE(pcs.goals, 0)), 0) as goals,
+            CASE WHEN SUM(COALESCE(pcs.minutes, 0)) > 0 THEN ROUND((SUM(COALESCE(pcs.goals, 0))::numeric / SUM(COALESCE(pcs.minutes, 0)) * 90)::numeric, 2) ELSE NULL END AS goals_p90,
+            NULLIF(SUM(COALESCE(pcs.assists, 0)), 0) as assists,
+            CASE WHEN SUM(COALESCE(pcs.minutes, 0)) > 0 THEN ROUND((SUM(COALESCE(pcs.assists, 0))::numeric / SUM(COALESCE(pcs.minutes, 0)) * 90)::numeric, 2) ELSE NULL END AS assists_p90,
+            NULLIF(SUM(COALESCE(pcs.goals, 0)) + SUM(COALESCE(pcs.assists, 0)), 0) as goals_assists,
+            CASE WHEN SUM(COALESCE(pcs.minutes, 0)) > 0 THEN ROUND(((SUM(COALESCE(pcs.goals, 0)) + SUM(COALESCE(pcs.assists, 0)))::numeric / SUM(COALESCE(pcs.minutes, 0)) * 90)::numeric, 2) ELSE NULL END AS goals_assists_p90,
+            NULLIF(SUM(COALESCE(pcs.clean_sheets, 0)), 0) as clean_sheets,
+            CASE WHEN SUM(COALESCE(pcs.minutes, 0)) > 0 THEN ROUND((SUM(COALESCE(pcs.clean_sheets, 0))::numeric / SUM(COALESCE(pcs.minutes, 0)) * 90)::numeric, 2) ELSE NULL END AS clean_sheets_p90,
+            NULLIF(SUM(COALESCE(pcs.goals_conceded, 0)), 0) as goals_conceded,
+            CASE WHEN SUM(COALESCE(pcs.minutes, 0)) > 0 THEN ROUND((SUM(COALESCE(pcs.goals_conceded, 0))::numeric / SUM(COALESCE(pcs.minutes, 0)) * 90)::numeric, 2) ELSE NULL END AS goals_conceded_p90,
+            NULLIF(SUM(COALESCE(pcs.cards_yellow, 0)), 0) as cards_yellow,
+            NULLIF(SUM(COALESCE(pcs.cards_red, 0)), 0) as cards_red,
+            NULLIF(SUM(COALESCE(pcs.cards_yellow_red, 0)), 0) as second_yellows
+        FROM player_comp_stats pcs
+        JOIN players p ON pcs.player_id = p.player_id
+        JOIN competitions comp ON pcs.competition_id = comp.competition_id
+        LEFT JOIN countries pc ON p.country_id = pc.country_id
+        LEFT JOIN countries pc2 ON p.country2_id = pc2.country_id
+        WHERE comp.season_year = :season_year
+            {country_filter}
+        GROUP BY p.player_id, p.player_name, p.tfm_pic_url, p.pixel_pic_url,
+                 p.position, p.other_positions,
+                 pc.name, pc.country_id, pc.flag_url,
+                 pc2.name, pc2.country_id, pc2.flag_url,
+                 pcs.team_id
+        HAVING SUM(COALESCE(pcs.games_played, 0)) > 0
+            AND SUM(COALESCE(pcs.minutes, 0)) > 0
+    ),
+    domestic_leagues AS (
+        -- Find the domestic league for each team
+        SELECT DISTINCT
+            pcs.team_id,
+            l.league_id,
+            l.tier_level,
+            comp.name AS comp_name,
+            lc.name AS country,
+            lc.flag_url AS flag_url
+        FROM player_comp_stats pcs
+        JOIN competitions comp ON pcs.competition_id = comp.competition_id
+        JOIN leagues l ON comp.league_id = l.league_id
+        JOIN countries lc ON l.country_id = lc.country_id
+        WHERE comp.season_year = :season_year
+            AND l.scope = 'domestic'
+            AND l.format = 'league'
+    ),
+    player_league_data AS (
+        -- Join aggregated stats with domestic league info
+        SELECT
+            dl.league_id,
+            dl.comp_name,
+            dl.tier_level,
+            dl.country,
+            dl.flag_url,
+            aps.player_id,
+            aps.player_name,
+            aps.tfm_pic_url,
+            aps.pixel_pic_url,
+            aps.player_country,
+            aps.player_country_id,
+            aps.player_flag_url,
+            aps.player_country2,
+            aps.player_country2_id,
+            aps.player_flag2_url,
+            COALESCE(t.name, '') AS team_name,
+            t.common_name,
+            t.team_id,
+            t.logo_url,
+            aps.position,
+            aps.other_positions,
+            aps.age,
+            aps.games_played,
+            aps.minutes,
+            aps.minutes_per_game,
+            aps.goals,
+            aps.goals_p90,
+            aps.assists,
+            aps.assists_p90,
+            aps.goals_assists,
+            aps.goals_assists_p90,
+            aps.clean_sheets,
+            aps.clean_sheets_p90,
+            aps.goals_conceded,
+            aps.goals_conceded_p90,
+            aps.cards_yellow,
+            aps.cards_red,
+            aps.second_yellows
+        FROM all_player_stats aps
+        JOIN teams t ON aps.team_id = t.team_id
+        JOIN domestic_leagues dl ON aps.team_id = dl.team_id
+    )
+    SELECT jsonb_build_object(
+        'data', jsonb_build_object(
+            'league_dist', COALESCE(
+                (
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'league_id', league_id,
+                            'comp_name', comp_name,
+                            'tier_level', tier_level,
+                            'country', country,
+                            'flag_url', flag_url,
+                            'player_count', player_count,
+                            'players', players
+                        )
+                        ORDER BY player_count DESC
+                    )
+                    FROM (
+                        SELECT
+                            league_id,
+                            MAX(comp_name) AS comp_name,
+                            MAX(tier_level) AS tier_level,
+                            MAX(country) AS country,
+                            MAX(flag_url) AS flag_url,
+                            COUNT(DISTINCT player_id) AS player_count,
+                            jsonb_agg(
+                                jsonb_build_object(
+                                    'player_name', player_name,
+                                    'player_id', player_id,
+                                    'tfm_pic_url', tfm_pic_url,
+                                    'pixel_pic_url', pixel_pic_url,
+                                    'country', player_country,
+                                    'country_id', player_country_id,
+                                    'flag_url', player_flag_url,
+                                    'country2', player_country2,
+                                    'country2_id', player_country2_id,
+                                    'flag2_url', player_flag2_url,
+                                    'team_name', team_name,
+                                    'common_name', common_name,
+                                    'team_id', team_id,
+                                    'logo_url', logo_url,
+                                    'age', age,
+                                    'position', position,
+                                    'other_positions', other_positions,
+                                    'stats', jsonb_build_object(
+                                        'games_played', games_played,
+                                        'minutes', minutes,
+                                        'minutes_per_game', minutes_per_game,
+                                        'goals', goals,
+                                        'goals_p90', goals_p90,
+                                        'assists', assists,
+                                        'assists_p90', assists_p90,
+                                        'goals_assists', goals_assists,
+                                        'goals_assists_p90', goals_assists_p90,
+                                        'clean_sheets', clean_sheets,
+                                        'clean_sheets_p90', clean_sheets_p90,
+                                        'goals_conceded', goals_conceded,
+                                        'goals_conceded_p90', goals_conceded_p90,
+                                        'cards_yellow', cards_yellow,
+                                        'cards_red', cards_red,
+                                        'second_yellows', second_yellows
+                                    )
+                                )
+                                ORDER BY minutes DESC, goals_assists DESC
+                            ) AS players
+                        FROM player_league_data
+                        GROUP BY league_id
+                    ) league_summary
+                ),
+                '[]'::jsonb
+            )
+        )
+    ) AS result;
+    """)
+    else:
+        # Original query - only domestic leagues
+        query = text(f"""
     WITH player_league_data AS (
-        SELECT 
+        SELECT
             l.league_id,
             comp.name AS comp_name,
             l.tier_level,
@@ -2359,22 +2552,43 @@ async def get_nation_league_distribution(
             p.player_id,
             p.player_name,
             p.tfm_pic_url,
+            p.pixel_pic_url,
             pc.name AS player_country,
             pc.country_id AS player_country_id,
             pc.flag_url AS player_flag_url,
             pc2.name AS player_country2,
             pc2.country_id AS player_country2_id,
             pc2.flag_url AS player_flag2_url,
-            t.name AS team_name,
+            COALESCE(t.name, '') AS team_name,
+            t.common_name,
             t.team_id,
             t.logo_url,
+            p.position,
+            p.other_positions,
             pcs.age,
             pcs.games_played,
             pcs.minutes,
-            pcs.minutes_per_game,
+            COALESCE(
+                NULLIF(pcs.minutes_per_game, 0.0),
+                CASE
+                    WHEN pcs.games_played IS NOT NULL AND pcs.games_played > 0 AND pcs.minutes IS NOT NULL
+                    THEN ROUND((pcs.minutes::numeric / pcs.games_played)::numeric, 2)
+                    ELSE NULL
+                END
+            ) AS minutes_per_game,
             pcs.goals,
+            COALESCE(pcs.goals_p90, CASE WHEN pcs.goals IS NOT NULL AND pcs.minutes IS NOT NULL AND pcs.minutes > 0 THEN ROUND((pcs.goals::numeric / pcs.minutes * 90)::numeric, 2) ELSE NULL END) AS goals_p90,
             pcs.assists,
-            pcs.goals_assists
+            COALESCE(pcs.assists_p90, CASE WHEN pcs.assists IS NOT NULL AND pcs.minutes IS NOT NULL AND pcs.minutes > 0 THEN ROUND((pcs.assists::numeric / pcs.minutes * 90)::numeric, 2) ELSE NULL END) AS assists_p90,
+            pcs.goals_assists,
+            COALESCE(pcs.goals_assists_p90, CASE WHEN pcs.goals_assists IS NOT NULL AND pcs.minutes IS NOT NULL AND pcs.minutes > 0 THEN ROUND((pcs.goals_assists::numeric / pcs.minutes * 90)::numeric, 2) ELSE NULL END) AS goals_assists_p90,
+            pcs.clean_sheets,
+            CASE WHEN pcs.clean_sheets IS NOT NULL AND pcs.minutes IS NOT NULL AND pcs.minutes > 0 THEN ROUND((pcs.clean_sheets::numeric / pcs.minutes * 90)::numeric, 2) ELSE NULL END AS clean_sheets_p90,
+            pcs.goals_conceded,
+            COALESCE(pcs.goals_conceded_p90, CASE WHEN pcs.goals_conceded IS NOT NULL AND pcs.minutes IS NOT NULL AND pcs.minutes > 0 THEN ROUND((pcs.goals_conceded::numeric / pcs.minutes * 90)::numeric, 2) ELSE NULL END) AS goals_conceded_p90,
+            pcs.cards_yellow,
+            pcs.cards_red,
+            pcs.cards_yellow_red AS second_yellows
         FROM player_comp_stats pcs
         JOIN players p ON pcs.player_id = p.player_id
         JOIN competitions comp ON pcs.competition_id = comp.competition_id
@@ -2418,6 +2632,7 @@ async def get_nation_league_distribution(
                                     'player_name', player_name,
                                     'player_id', player_id,
                                     'tfm_pic_url', tfm_pic_url,
+                                    'pixel_pic_url', pixel_pic_url,
                                     'country', player_country,
                                     'country_id', player_country_id,
                                     'flag_url', player_flag_url,
@@ -2425,15 +2640,30 @@ async def get_nation_league_distribution(
                                     'country2_id', player_country2_id,
                                     'flag2_url', player_flag2_url,
                                     'team_name', team_name,
+                                    'common_name', common_name,
                                     'team_id', team_id,
                                     'logo_url', logo_url,
                                     'age', age,
-                                    'games_played', games_played,
-                                    'minutes', minutes,
-                                    'minutes_per_game', minutes_per_game,
-                                    'goals', goals,
-                                    'assists', assists,
-                                    'goals_assists', goals_assists
+                                    'position', position,
+                                    'other_positions', other_positions,
+                                    'stats', jsonb_build_object(
+                                        'games_played', games_played,
+                                        'minutes', minutes,
+                                        'minutes_per_game', minutes_per_game,
+                                        'goals', goals,
+                                        'goals_p90', goals_p90,
+                                        'assists', assists,
+                                        'assists_p90', assists_p90,
+                                        'goals_assists', goals_assists,
+                                        'goals_assists_p90', goals_assists_p90,
+                                        'clean_sheets', clean_sheets,
+                                        'clean_sheets_p90', clean_sheets_p90,
+                                        'goals_conceded', goals_conceded,
+                                        'goals_conceded_p90', goals_conceded_p90,
+                                        'cards_yellow', cards_yellow,
+                                        'cards_red', cards_red,
+                                        'second_yellows', second_yellows
+                                    )
                                 )
                                 ORDER BY minutes DESC, goals_assists DESC
                             ) AS players
@@ -2450,6 +2680,7 @@ async def get_nation_league_distribution(
     result = session.exec(query, params=params).first()
     
     return result[0] if result else {"data": {"league_dist": []}}
+
 
 # best highscoring games by dates
 @router.get("/best-games/{league_id}", response_model=BestGamesResponse)
@@ -3171,43 +3402,75 @@ async def get_player_stats_detailed_with_opp(
 
 
 # show league table with player's ga
-@router.get("/player-stats-table/{player_id}/{season_year}", response_model=PlayerStatsTableResponse)
+@router.get("/player-stats-table/{player_id}", response_model=PlayerStatsTableResponse)
 async def get_player_stats_table(
     player_id: int,
-    season_year: int,
-    session: DBSession
+    session: DBSession,
+    season_year: int = Query(default=2025)
 ):
+
     query = text("""
         WITH detected_league AS (
             SELECT t.league_id
             FROM player_match_stats pms
             JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
             JOIN teams t ON pms.team_id = t.team_id
             WHERE pms.player_id = :player_id
-                AND m.match_date >= MAKE_DATE(:season_year, 8, 1)
-                AND m.match_date <= MAKE_DATE(:season_year + 1, 7, 20)
+                AND comp.season_year = :season_year
             GROUP BY pms.team_id, t.league_id
             ORDER BY COUNT(*) DESC
             LIMIT 1
         ),
+        all_player_comps AS (
+            SELECT DISTINCT comp.competition_id, comp.league_id, comp.season_year
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            WHERE pms.player_id = :player_id
+                AND comp.season_year = :season_year
+        ),
         league_comps AS (
             SELECT competition_id
-            FROM competitions
+            FROM all_player_comps
             WHERE league_id = (SELECT league_id FROM detected_league)
-                AND season_year = :season_year
+            AND season_year = :season_year
+        ),
+        own_goal_beneficiary_teams AS (
+            -- Teams that benefited from player's own goals (should be excluded from teams list)
+            SELECT DISTINCT me.team_id
+            FROM match_events me
+            JOIN matches m ON me.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            WHERE me.active_player_id = :player_id
+                AND me.event_type = 'goal'
+                AND COALESCE(me.active_notes, '') = 'own goal'
+                AND comp.season_year = :season_year
         ),
         player_teams AS (
+            -- Only include teams where player actually played for them
+            -- Exclude teams that only appear because they benefited from own goals
             SELECT DISTINCT
                 t.team_id,
                 t.name as team_name,
+                t.common_name,
                 t.logo_url
             FROM player_match_stats pms
             JOIN matches m ON pms.match_id = m.match_id
             JOIN competitions comp ON m.comp_id = comp.competition_id
             JOIN teams t ON pms.team_id = t.team_id
             WHERE pms.player_id = :player_id
-                AND comp.league_id = (SELECT league_id FROM detected_league)
                 AND comp.season_year = :season_year
+                AND t.team_id NOT IN (SELECT team_id FROM own_goal_beneficiary_teams)
+        ),
+        player_positions AS (
+            SELECT DISTINCT pms.position
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            WHERE pms.player_id = :player_id
+                AND comp.season_year = :season_year
+                AND pms.position IS NOT NULL
         ),
         player_stats_vs_teams AS (
             SELECT
@@ -3215,28 +3478,50 @@ async def get_player_stats_table(
                     WHEN pms.team_id = m.home_id THEN m.away_id
                     ELSE m.home_id
                 END as opponent_id,
-                SUM(pms.goals) as goals_against,
-                SUM(pms.assists) as assists_against,
+                SUM(CASE
+                    WHEN me.event_type IN ('goal', 'penalty goal')
+                    AND me.active_player_id = :player_id
+                    AND COALESCE(me.active_notes, '') != 'own goal'
+                    THEN 1 ELSE 0
+                END) as goals_against,
+                SUM(CASE
+                    WHEN me.event_type IN ('goal', 'penalty goal')
+                    AND me.passive_player_id = :player_id
+                    AND COALESCE(me.active_notes, '') != 'own goal'
+                    THEN 1 ELSE 0
+                END) as assists_against,
+                SUM(CASE
+                    WHEN me.event_type = 'penalty goal'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as pens_against,
+                SUM(CASE
+                    WHEN me.event_type = 'yellow card'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as cards_yellow_against,
+                SUM(CASE
+                    WHEN me.event_type = 'red card'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as cards_red_against,
+                SUM(CASE
+                    WHEN me.event_type = 'second yellow card'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as cards_yellow_red_against,
                 SUM(pms.minutes) as minutes_against,
                 ROUND(AVG(pms.minutes)::numeric, 2) as minutes_per_game_against,
-                SUM(pms.cards_yellow) as cards_yellow_against,
-                SUM(pms.cards_red) as cards_red_against,
-                SUM(pms.cards_yellow_red) as cards_yellow_red_against,
                 BOOL_OR(
                     COALESCE(pms.started, false) OR
                     COALESCE(pms.subbed_on, false) OR
-                    COALESCE(pms.goals, 0) > 0 OR
-                    COALESCE(pms.assists, 0) > 0 OR
-                    COALESCE(pms.minutes, 0) > 0 OR
-                    COALESCE(pms.cards_yellow, 0) > 0 OR
-                    COALESCE(pms.cards_red, 0) > 0 OR
-                    COALESCE(pms.cards_yellow_red, 0) > 0
+                    COALESCE(pms.subbed_off, false)
                 ) as played
             FROM player_match_stats pms
             JOIN matches m ON pms.match_id = m.match_id
             JOIN competitions comp ON m.comp_id = comp.competition_id
+            LEFT JOIN match_events me ON pms.match_id = me.match_id
             WHERE pms.player_id = :player_id
-                AND comp.league_id = (SELECT league_id FROM detected_league)
                 AND comp.season_year = :season_year
             GROUP BY opponent_id
         ),
@@ -3251,6 +3536,7 @@ async def get_player_stats_table(
                 r.gd,
                 r.gp,
                 t.name as team_name,
+                t.common_name,
                 t.logo_url,
                 t.league_id,
                 l.tier_level,
@@ -3271,54 +3557,21 @@ async def get_player_stats_table(
                 END as opponent_team_id
             FROM player_match_stats pms
             JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
             WHERE pms.player_id = :player_id
-                AND m.match_date >= MAKE_DATE(:season_year, 8, 1)
-                AND m.match_date <= MAKE_DATE(:season_year + 1, 7, 20)
-        ),
-        opponent_leagues AS (
-            SELECT DISTINCT t.league_id
-            FROM opponent_teams ot
-            JOIN teams t ON ot.opponent_team_id = t.team_id
-            WHERE t.league_id != (SELECT league_id FROM detected_league)
-        ),
-        other_league_comps AS (
-            SELECT DISTINCT comp.competition_id, comp.league_id
-            FROM competitions comp
-            WHERE comp.league_id IN (SELECT league_id FROM opponent_leagues)
                 AND comp.season_year = :season_year
         ),
-        other_player_stats_vs_teams AS (
-            SELECT
-                opp_team.league_id,
-                CASE
-                    WHEN pms.team_id = m.home_id THEN m.away_id
-                    ELSE m.home_id
-                END as opponent_id,
-                SUM(pms.goals) as goals_against,
-                SUM(pms.assists) as assists_against,
-                SUM(pms.minutes) as minutes_against,
-                ROUND(AVG(pms.minutes)::numeric, 2) as minutes_per_game_against,
-                SUM(pms.cards_yellow) as cards_yellow_against,
-                SUM(pms.cards_red) as cards_red_against,
-                SUM(pms.cards_yellow_red) as cards_yellow_red_against,
-                BOOL_OR(
-                    COALESCE(pms.started, false) OR
-                    COALESCE(pms.subbed_on, false) OR
-                    COALESCE(pms.goals, 0) > 0 OR
-                    COALESCE(pms.assists, 0) > 0 OR
-                    COALESCE(pms.minutes, 0) > 0 OR
-                    COALESCE(pms.cards_yellow, 0) > 0 OR
-                    COALESCE(pms.cards_red, 0) > 0 OR
-                    COALESCE(pms.cards_yellow_red, 0) > 0
-                ) as played
-            FROM player_match_stats pms
-            JOIN matches m ON pms.match_id = m.match_id
-            JOIN teams opp_team ON (CASE WHEN pms.team_id = m.home_id THEN m.away_id ELSE m.home_id END) = opp_team.team_id
-            WHERE pms.player_id = :player_id
-                AND m.match_date >= MAKE_DATE(:season_year, 8, 1)
-                AND m.match_date <= MAKE_DATE(:season_year + 1, 7, 20)
-                AND opp_team.league_id IN (SELECT league_id FROM opponent_leagues)
-            GROUP BY opp_team.league_id, opponent_id
+        other_league_comps AS (
+            -- Find domestic league competitions for all opponent teams
+            -- This includes teams from ANY competition (Champions League, domestic league, etc.)
+            SELECT DISTINCT r.competition_id, comp.league_id, comp.season_year
+            FROM opponent_teams ot
+            JOIN ranks r ON r.team_id = ot.opponent_team_id
+            JOIN competitions comp ON comp.competition_id = r.competition_id
+            JOIN leagues l ON comp.league_id = l.league_id
+            WHERE l.scope = 'domestic'
+                AND comp.league_id != (SELECT league_id FROM detected_league)
+                AND comp.season_year = :season_year
         ),
         other_league_ranks AS (
             SELECT
@@ -3331,6 +3584,7 @@ async def get_player_stats_table(
                 r.gd,
                 r.gp,
                 t.name as team_name,
+                t.common_name,
                 t.logo_url,
                 t.league_id,
                 l.tier_level,
@@ -3342,6 +3596,138 @@ async def get_player_stats_table(
             LEFT JOIN leagues l ON t.league_id = l.league_id
             LEFT JOIN countries c ON t.country_id = c.country_id
             WHERE r.competition_id IN (SELECT competition_id FROM other_league_comps)
+        ),
+        other_player_stats_vs_teams AS (
+            SELECT
+                opponent_id,
+                SUM(CASE
+                    WHEN me.event_type IN ('goal', 'penalty goal')
+                    AND me.active_player_id = :player_id
+                    AND COALESCE(me.active_notes, '') != 'own goal'
+                    THEN 1 ELSE 0
+                END) as goals_against,
+                SUM(CASE
+                    WHEN me.event_type IN ('goal', 'penalty goal')
+                    AND me.passive_player_id = :player_id
+                    AND COALESCE(me.active_notes, '') != 'own goal'
+                    THEN 1 ELSE 0
+                END) as assists_against,
+                SUM(CASE
+                    WHEN me.event_type = 'penalty goal'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as pens_against,
+                SUM(CASE
+                    WHEN me.event_type = 'yellow card'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as cards_yellow_against,
+                SUM(CASE
+                    WHEN me.event_type = 'red card'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as cards_red_against,
+                SUM(CASE
+                    WHEN me.event_type = 'second yellow card'
+                    AND me.active_player_id = :player_id
+                    THEN 1 ELSE 0
+                END) as cards_yellow_red_against,
+                SUM(pms.minutes) as minutes_against,
+                ROUND(AVG(pms.minutes)::numeric, 2) as minutes_per_game_against,
+                BOOL_OR(
+                    COALESCE(pms.started, false) OR
+                    COALESCE(pms.subbed_on, false) OR
+                    COALESCE(pms.subbed_off, false)
+                ) as played
+            FROM (
+                SELECT DISTINCT
+                    CASE WHEN pms.team_id = m.home_id THEN m.away_id ELSE m.home_id END as opponent_id,
+                    pms.match_id
+                FROM player_match_stats pms
+                JOIN matches m ON pms.match_id = m.match_id
+                JOIN competitions comp ON m.comp_id = comp.competition_id
+                WHERE pms.player_id = :player_id
+                    AND comp.season_year = :season_year
+            ) opponents
+            JOIN player_match_stats pms ON pms.match_id = opponents.match_id AND pms.player_id = :player_id
+            LEFT JOIN match_events me ON pms.match_id = me.match_id
+            WHERE opponents.opponent_id IN (SELECT DISTINCT team_id FROM other_league_ranks)
+            GROUP BY opponent_id
+        ),
+        player_matches AS (
+            SELECT DISTINCT
+                m.match_id,
+                comp.league_id,
+                l.scope,
+                l.competition_level,
+                l.tier_level,
+                m.comp_id,
+                comp.season_year,
+                m.match_date,
+                m.match_time_utc,
+                m.round,
+                m.result_string,
+                m.home_goals,
+                m.away_goals,
+                m.win_team as win_team_id,
+                m.loss_team as loss_team_id,
+                m.isdraw,
+                m.extra_time,
+                m.pens,
+                comp.pixel_logo_url,
+                comp.name as comp_name,
+                comp.logo_url,
+                ht.team_id as home_team_id,
+                ht.name as home_team_name,
+                ht.common_name as home_common_name,
+                ht.logo_url as home_team_logo,
+                at.team_id as away_team_id,
+                at.name as away_team_name,
+                at.common_name as away_common_name,
+                at.logo_url as away_team_logo,
+                pms.started as player_started,
+                pms.subbed_on,
+                pms.subbed_off,
+                pms.team_id as player_team_id,
+                pms.minutes
+            FROM player_match_stats pms
+            JOIN matches m ON pms.match_id = m.match_id
+            JOIN competitions comp ON m.comp_id = comp.competition_id
+            JOIN leagues l ON comp.league_id = l.league_id
+            JOIN teams ht ON m.home_id = ht.team_id
+            JOIN teams at ON m.away_id = at.team_id
+            WHERE pms.player_id = :player_id
+                AND comp.season_year = :season_year
+                AND m.isplayed = True
+        ),
+        match_all_events AS (
+            SELECT
+                me.match_id,
+                me.home_goals,
+                me.away_goals,
+                me.active_player_id,
+                ap.player_name as active_player_name,
+                me.passive_player_id,
+                pp.player_name as passive_player_name,
+                me.team_id,
+                COALESCE(
+                    me.opp_team_id,
+                    CASE
+                        WHEN me.team_id = m.home_id THEN m.away_id
+                        ELSE m.home_id
+                    END
+                ) as opp_team_id,
+                me.event_type,
+                me.minute as event_minute,
+                me.add_minute as event_extra_minute,
+                me.body_part,
+                me.active_notes,
+                me.passive_notes
+            FROM match_events me
+            JOIN matches m ON me.match_id = m.match_id
+            JOIN players ap ON me.active_player_id = ap.player_id
+            LEFT JOIN players pp ON me.passive_player_id = pp.player_id
+            WHERE me.match_id IN (SELECT match_id FROM player_matches)
         )
         SELECT json_build_object(
             'data', json_build_object(
@@ -3349,16 +3735,22 @@ async def get_player_stats_table(
                     SELECT json_build_object(
                         'player_id', p.player_id,
                         'player_name', p.player_name,
-                        'tfm_pic_url', p.tfm_pic_url
+                        'tfm_pic_url', p.tfm_pic_url,
+                        'pixel_pic_url', p.pixel_pic_url
                     )
                     FROM players p
                     WHERE p.player_id = :player_id
+                ),
+                'positions', (
+                    SELECT COALESCE(array_agg(pp.position), ARRAY[]::text[])
+                    FROM player_positions pp
                 ),
                 'teams', (
                     SELECT COALESCE(json_agg(
                         json_build_object(
                             'team_id', pt.team_id,
                             'team_name', pt.team_name,
+                            'common_name', pt.common_name,
                             'logo_url', pt.logo_url
                         )
                     ), '[]'::json)
@@ -3370,6 +3762,7 @@ async def get_player_stats_table(
                             'team', json_build_object(
                                 'team_id', lr.team_id,
                                 'team_name', lr.team_name,
+                                'common_name', lr.common_name,
                                 'logo_url', lr.logo_url,
                                 'league_id', lr.league_id,
                                 'tier_level', lr.tier_level,
@@ -3391,6 +3784,7 @@ async def get_player_stats_table(
                             'cards_yellow', COALESCE(pvt.cards_yellow_against, 0),
                             'cards_red', COALESCE(pvt.cards_red_against, 0),
                             'cards_yellow_red', COALESCE(pvt.cards_yellow_red_against, 0),
+                            'pens', COALESCE(pvt.pens_against, 0),
                             'played', COALESCE(pvt.played, false)
                         ) ORDER BY lr.rank ASC
                     )
@@ -3403,6 +3797,7 @@ async def get_player_stats_table(
                             'team', json_build_object(
                                 'team_id', olr.team_id,
                                 'team_name', olr.team_name,
+                                'common_name', olr.common_name,
                                 'logo_url', olr.logo_url,
                                 'league_id', olr.league_id,
                                 'tier_level', olr.tier_level,
@@ -3424,11 +3819,79 @@ async def get_player_stats_table(
                             'cards_yellow', COALESCE(opvt.cards_yellow_against, 0),
                             'cards_red', COALESCE(opvt.cards_red_against, 0),
                             'cards_yellow_red', COALESCE(opvt.cards_yellow_red_against, 0),
+                            'pens', COALESCE(opvt.pens_against, 0),
                             'played', COALESCE(opvt.played, false)
                         ) ORDER BY olr.league_id, olr.rank ASC
                     )
                     FROM other_league_ranks olr
-                    LEFT JOIN other_player_stats_vs_teams opvt ON olr.team_id = opvt.opponent_id AND olr.league_id = opvt.league_id
+                    LEFT JOIN other_player_stats_vs_teams opvt ON olr.team_id = opvt.opponent_id
+                ), '[]'::json),
+                'matches', COALESCE((
+                    SELECT json_agg(
+                        json_build_object(
+                            'match_id', pm.match_id,
+                            'league_id', pm.league_id,
+                            'scope', pm.scope,
+                            'competition_level', pm.competition_level,
+                            'tier_level', pm.tier_level,
+                            'comp_id', pm.comp_id,
+                            'season_year', pm.season_year,
+                            'match_date', pm.match_date,
+                            'match_time_utc', pm.match_time_utc,
+                            'round', pm.round,
+                            'result_string', pm.result_string,
+                            'home_goals', pm.home_goals,
+                            'away_goals', pm.away_goals,
+                            'win_team_id', pm.win_team_id,
+                            'loss_team_id', pm.loss_team_id,
+                            'isdraw', pm.isdraw,
+                            'extra_time', pm.extra_time,
+                            'pens', pm.pens,
+                            'pixel_logo_url', pm.pixel_logo_url,
+                            'comp_name', pm.comp_name,
+                            'logo_url', pm.logo_url,
+                            'player_started', pm.player_started,
+                            'subbed_on', pm.subbed_on,
+                            'subbed_off', pm.subbed_off,
+                            'player_team_id', pm.player_team_id,
+                            'minutes', pm.minutes,
+                            'home_team', json_build_object(
+                                'team_id', pm.home_team_id,
+                                'team_name', pm.home_team_name,
+                                'common_name', pm.home_common_name,
+                                'logo_url', pm.home_team_logo
+                            ),
+                            'away_team', json_build_object(
+                                'team_id', pm.away_team_id,
+                                'team_name', pm.away_team_name,
+                                'common_name', pm.away_common_name,
+                                'logo_url', pm.away_team_logo
+                            ),
+                            'events', COALESCE((
+                                SELECT json_agg(
+                                    json_build_object(
+                                        'home_goals', mae.home_goals,
+                                        'away_goals', mae.away_goals,
+                                        'active_player_id', mae.active_player_id,
+                                        'active_player_name', mae.active_player_name,
+                                        'passive_player_id', mae.passive_player_id,
+                                        'passive_player_name', mae.passive_player_name,
+                                        'team_id', mae.team_id,
+                                        'opp_team_id', mae.opp_team_id,
+                                        'event_type', mae.event_type,
+                                        'event_minute', mae.event_minute,
+                                        'event_extra_minute', mae.event_extra_minute,
+                                        'body_part', mae.body_part,
+                                        'active_notes', mae.active_notes,
+                                        'passive_notes', mae.passive_notes
+                                    ) ORDER BY mae.event_minute ASC, mae.event_extra_minute ASC
+                                )
+                                FROM match_all_events mae
+                                WHERE mae.match_id = pm.match_id
+                            ), '[]'::json)
+                        ) ORDER BY pm.match_date DESC
+                    )
+                    FROM player_matches pm
                 ), '[]'::json)
             )
         ) as result
@@ -3441,7 +3904,7 @@ async def get_player_stats_table(
 
     result = session.exec(query, params=params).first()
 
-    return result[0] if result else {"data": {"player": None, "teams": [], "ranks": []}}
+    return result[0] if result else {"data": {"player": None, "teams": [], "ranks": [], "other_ranks": [], "matches": []}}
 
 
 # get ig followers + difference by each entry

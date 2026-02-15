@@ -263,6 +263,8 @@ class TotalStats(BaseModel):
     goals: Optional[int] = 0
     assists: Optional[int] = 0
     goals_assists: Optional[int] = 0
+    
+    
 
 class CompStats(BaseModel):
     comp: CompInfo
@@ -294,7 +296,8 @@ class LoanWatchResponse(BaseModel):
 # /stats/player-stats-table/{player_id}/{league_id}/{season_year}
 class TeamData(BaseModel):
     team_id: int
-    team_name: str
+    team_name: Optional[str] = None
+    common_name: Optional[str] = None    
     logo_url: Optional[str] = None
     league_id: Optional[int] = None
     tier_level: Optional[str] = None
@@ -304,27 +307,89 @@ class TeamData(BaseModel):
     
 class TeamRankWithPlayerStats(BaseModel):
     team: TeamData
-    rank: int
-    points: int
-    wins: int
-    draws: int
-    losses: int
-    gd: int
-    gp: int
-    player_goals: int
-    player_assists: int
-    minutes: int
-    minutes_per_game: float
-    cards_yellow: int
-    cards_red: int
-    cards_yellow_red: int
-    played: bool
+    rank: Optional[int] = None
+    points: Optional[int] = None
+    wins: Optional[int] = None
+    draws: Optional[int] = None
+    losses: Optional[int] = None
+    gd: Optional[int] = None
+    gp: Optional[int] = None
+    player_goals: Optional[int] = None
+    player_assists: Optional[int] = None
+    minutes: Optional[int] = None
+    minutes_per_game: Optional[float] = None
+    cards_yellow: Optional[int] = None
+    cards_red: Optional[int] = None
+    cards_yellow_red: Optional[int] = None
+    pens: Optional[int] = None
+    played: Optional[bool] = None
 
+class MatchEvent(BaseModel):
+    home_goals: Optional[int] = None
+    away_goals: Optional[int] = None
+    active_player_id: int
+    active_player_name: Optional[str] = None
+    passive_player_id: Optional[int] = None
+    passive_player_name: Optional[str] = None
+    team_id: int
+    opp_team_id: int
+    event_type: str
+    event_minute: int
+    event_extra_minute: Optional[int] = None
+    body_part: Optional[str] = None
+    active_notes: Optional[str] = None
+    passive_notes: Optional[str] = None
+    
+class TeamInformation(BaseModel):
+    team_id: int
+    team_name: Optional[str] = None
+    common_name: Optional[str] = None
+    logo_url: Optional[str] = None
+    
+class MatchWithEvents(BaseModel):
+    match_id: int
+    league_id: int
+    scope: Optional[str] = None
+    competition_level: Optional[str] = None
+    tier_level: Optional[str] = None
+    comp_id: int
+    season_year: Optional[int] = None
+    match_date: date
+    match_time_utc: Optional[datetime] = None
+    round: Optional[str] = None
+    result_string: Optional[str] = None
+    home_goals: Optional[int] = None
+    away_goals: Optional[int] = None
+    home_team: TeamInformation
+    away_team: TeamInformation
+    win_team_id: Optional[int] = None
+    loss_team_id: Optional[int] = None
+    player_team_id: Optional[int] = None
+    isdraw: Optional[bool] = None
+    extra_time: Optional[bool] = None
+    pens: Optional[bool] = None
+    pixel_logo_url: Optional[str] = None
+    comp_name: Optional[str] = None
+    logo_url: Optional[str] = None
+    player_started: Optional[bool] = None
+    minutes: Optional[int] = None
+    subbed_on: Optional[bool] = None
+    subbed_off: Optional[bool] = None
+    events: List[MatchEvent] = None
+
+class PlayerInformation(BaseModel):
+    player_name: Optional[str] = None
+    player_id: int
+    tfm_pic_url: Optional[str] = None
+    pixel_pic_url: Optional[str] = None
+    
 class PlayerStatsTableData(BaseModel):
-    player: PlayerInfo
-    teams: List[TeamInfo]
+    player: PlayerInformation
+    positions: List[str] = None
+    teams: List[TeamInformation]
     ranks: List[TeamRankWithPlayerStats]
     other_ranks: List[TeamRankWithPlayerStats]
+    matches: List[MatchWithEvents]
 
 class PlayerStatsTableResponse(BaseModel):
     data: PlayerStatsTableData
