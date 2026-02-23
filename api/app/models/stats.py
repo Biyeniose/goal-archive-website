@@ -365,6 +365,7 @@ class MatchWithEvents(BaseModel):
     win_team_id: Optional[int] = None
     loss_team_id: Optional[int] = None
     player_team_id: Optional[int] = None
+    player_age: Optional[int] = None
     isdraw: Optional[bool] = None
     extra_time: Optional[bool] = None
     pens: Optional[bool] = None
@@ -393,6 +394,54 @@ class PlayerStatsTableData(BaseModel):
 
 class PlayerStatsTableResponse(BaseModel):
     data: PlayerStatsTableData
+
+class TeamMatchWithEvents(BaseModel):
+    match_id: int
+    league_id: int
+    scope: Optional[str] = None
+    competition_level: Optional[str] = None
+    tier_level: Optional[str] = None
+    comp_id: int
+    season_year: Optional[int] = None
+    match_date: date
+    match_time_utc: Optional[datetime] = None
+    round: Optional[str] = None
+    result_string: Optional[str] = None
+    home_goals: Optional[int] = None
+    away_goals: Optional[int] = None
+    home_team: TeamInformation
+    away_team: TeamInformation
+    win_team_id: Optional[int] = None
+    loss_team_id: Optional[int] = None
+    isdraw: Optional[bool] = None
+    extra_time: Optional[bool] = None
+    pens: Optional[bool] = None
+    pixel_logo_url: Optional[str] = None
+    comp_name: Optional[str] = None
+    logo_url: Optional[str] = None
+
+    events: List[MatchEvent] = None
+
+class TeamRank(BaseModel):
+    team: TeamData
+    rank: Optional[int] = None
+    points: Optional[int] = None
+    wins: Optional[int] = None
+    draws: Optional[int] = None
+    losses: Optional[int] = None
+    gd: Optional[int] = None
+    gp: Optional[int] = None
+    
+class TeamStatsTableData(BaseModel):
+    team: TeamInformation
+    ranks: List[TeamRank]
+    other_ranks: List[TeamRank]
+    matches: List[TeamMatchWithEvents]
+    
+# /players-stats-tab;e
+class TeamStatsTableResponse(BaseModel):
+    data: TeamStatsTableData
+
 
 # /followers decrease
 class PlayerFollowerDecrease(BaseModel):
@@ -485,6 +534,8 @@ class PlayerFollowerHistoryWithGames(BaseModel):
     player_name: str
     player_id: int
     tfm_pic_url: Optional[str] = None
+    pixel_pic_url: Optional[str] = None
+    
     follower_entries: List[FollowerEntry]
     matches_played: List[MatchPlayed]
 
