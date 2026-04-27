@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException
 
 from ..dependencies import DBSession, AppLoggerDep
-from ..models.league import LeagueListResponse, LeagueStandingsResponse, LeagueStatsResponse, LeagueStatsbyDateResponse, LeagueStatsByDateData
+from ..models.league import LeagueListResponse, LeagueStandingsResponse, LeagueStatsResponse, LeagueStatsbyDateResponse, LeagueStatsByDateData, BestLoaneesResponse
 from ..constants import STAT_COLUMNS, BYDATE_STAT_COLUMNS, DEFAULT_LEAGUE_IDS, POSITION_GROUPS
 
 router = APIRouter(
@@ -176,73 +176,7 @@ async def get_league_stats(
             LEFT JOIN countries tc ON tc.country_id = t.country_id
             GROUP BY pt.player_id
         ),
-        -- Step 6: distinct competitions per player
-        player_competitions AS (
-            SELECT
-                pc.player_id,
-                json_agg(json_build_object(
-                    'competition_id', sc.competition_id,
-                    'season_year',    sc.season_year,
-                    'stage',          sc.stage,
-                    'logo_url',       sc.comp_logo_url,
-                    'league', json_build_object(
-                        'league_id',        l.league_id,
-                        'league_name',      l.name,
-                        'tier_level',       l.tier_level,
-                        'format',           l.format,
-                        'competiton_level', l.competition_level,
-                        'country', CASE
-                            WHEN lc.country_id IS NULL THEN NULL
-                            ELSE json_build_object(
-                                'country_id', lc.country_id,
-                                'name',       lc.name,
-                                'flag_url',   lc.flag_url,
-                                'continent',  lc.continent,
-                                'iso_code_3', lc.iso_code_3
-                            )
-                        END
-                    )
-                )) AS competitions
-            FROM (
-                SELECT DISTINCT pcs.player_id, pcs.competition_id
-                FROM player_comp_stats pcs
-                JOIN selected_comps sc ON sc.competition_id = pcs.competition_id
-            ) pc
-            JOIN selected_comps sc ON sc.competition_id = pc.competition_id
-            JOIN leagues l         ON l.league_id = sc.league_id
-            LEFT JOIN countries lc ON lc.country_id = l.country_id
-            GROUP BY pc.player_id
-        ),
-        -- Step 7: all competitions used in this search (for LeagueStatsData.competitions)
-        all_competitions AS (
-            SELECT json_agg(json_build_object(
-                'competition_id', sc.competition_id,
-                'season_year',    sc.season_year,
-                'stage',          sc.stage,
-                'logo_url',       sc.comp_logo_url,
-                'league', json_build_object(
-                    'league_id',        l.league_id,
-                    'league_name',      l.name,
-                    'tier_level',       l.tier_level,
-                    'format',           l.format,
-                    'competiton_level', l.competition_level,
-                    'country', CASE
-                        WHEN lc.country_id IS NULL THEN NULL
-                        ELSE json_build_object(
-                            'country_id', lc.country_id,
-                            'name',       lc.name,
-                            'flag_url',   lc.flag_url,
-                            'continent',  lc.continent,
-                            'iso_code_3', lc.iso_code_3
-                        )
-                    END
-                )
-            )) AS comps_json
-            FROM selected_comps sc
-            JOIN leagues l         ON l.league_id = sc.league_id
-            LEFT JOIN countries lc ON lc.country_id = l.country_id
-        ),
-        -- Step 8: build the full player list sorted by requested stat, limited
+        -- Step 6: build the full player list sorted by requested stat, limited
         all_players AS (
             SELECT COALESCE(json_agg(
                 json_build_object(
@@ -278,7 +212,6 @@ async def get_league_stats(
                         )
                     ),
                     'teams',        pt.teams,
-                    'competitions', pc.competitions,
                     'stats', json_build_object(
                         'gp',                ranked.gp,
                         'minutes',           ranked.minutes,
@@ -296,7 +229,8 @@ async def get_league_stats(
                         'penalty_goals',     ranked.penalty_goals,
                         'pens_att',          ranked.pens_att,
                         'cards_yellow',      ranked.cards_yellow,
-                        'cards_red',         ranked.cards_red
+                        'cards_red',         ranked.cards_red,
+                        'competition',       NULL
                     )
                 )
                 ORDER BY ranked.{stat_col} DESC NULLS LAST
@@ -312,19 +246,17 @@ async def get_league_stats(
                 ORDER BY tot.{stat_col} DESC NULLS LAST
                 LIMIT :limit
             ) ranked
-            LEFT JOIN countries c1      ON c1.country_id = ranked.p_country_id
-            LEFT JOIN countries c2      ON c2.country_id = ranked.p_country2_id
-            JOIN player_teams pt        ON pt.player_id  = ranked.player_id
-            JOIN player_competitions pc ON pc.player_id  = ranked.player_id
+            LEFT JOIN countries c1 ON c1.country_id = ranked.p_country_id
+            LEFT JOIN countries c2 ON c2.country_id = ranked.p_country2_id
+            JOIN player_teams pt   ON pt.player_id  = ranked.player_id
         )
         SELECT json_build_object(
             'data', json_build_object(
-                'season_year',  :season_year,
-                'competitions', ac.comps_json,
-                'players',      ap.players_json
+                'season_year', :season_year,
+                'players',     ap.players_json
             )
         )
-        FROM all_competitions ac, all_players ap
+        FROM all_players ap
     """)
 
     result = session.exec(query, params=params).first()
@@ -488,7 +420,8 @@ async def get_league_stats_bydate(
                         'penalty_goals',     ranked.pens_made,
                         'pens_att',          ranked.pens_att,
                         'cards_yellow',      NULL,
-                        'cards_red',         NULL
+                        'cards_red',         NULL,
+                        'competition',       NULL
                     )
                 )
                 ORDER BY ranked.{stat_col} DESC NULLS LAST
@@ -577,5 +510,298 @@ async def get_league_standings(
     result = session.exec(query, params={"league_id": league_id, "season_year": season_year}).first()
     return result[0] if result else {"data": []}
 
+
+# get best loan players currently
+@router.get("/best-loanees", response_model=BestLoaneesResponse)
+async def get_best_loanees(
+    session: DBSession,
+    logger: AppLoggerDep,
+    start_date: str = Query("2025-07-01", description="Loan window start (YYYY-MM-DD)"),
+    end_date: str = Query("2026-06-30", description="Loan window end (YYYY-MM-DD)"),
+    stat: str = Query("goals", description=f"Stat to sort by: {', '.join(sorted(STAT_COLUMNS))}"),
+    limit: int = Query(20, description="Maximum number of players to return"),
+):
+    if stat not in STAT_COLUMNS:
+        raise HTTPException(status_code=400, detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(STAT_COLUMNS))}")
+
+    from datetime import datetime as dt
+    start_year = dt.strptime(start_date, "%Y-%m-%d").year
+    end_year = dt.strptime(end_date, "%Y-%m-%d").year
+    stat_col = stat
+
+    logger.info(f"Fetching best loanees: {start_date} to {end_date}, stat={stat}, limit={limit}")
+
+    params = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "start_year": start_year,
+        "end_year": end_year,
+        "limit": limit,
+    }
+
+    query = text(f"""
+        WITH
+        lt AS (
+            SELECT
+                t.id AS transfer_id,
+                t.player_id,
+                t.to_team_id   AS loan_team_id,
+                t.from_team_id AS parent_team_id,
+                t.transfer_date AS loan_start_date,
+                t.fee,
+                t.player_value,
+                t.season,
+                t.season_str
+            FROM transfers t
+            WHERE t.isloan = true
+              AND t.transfer_date BETWEEN :start_date AND :end_date
+              AND NOT EXISTS (
+                  SELECT 1 FROM transfers lo
+                  WHERE lo.player_id    = t.player_id
+                    AND lo.from_team_id = t.to_team_id
+                    AND lo.to_team_id   = t.from_team_id
+                    AND lo.isloan       = true
+                    AND lo.transfer_date < t.transfer_date
+              )
+        ),
+        rt AS (
+            SELECT DISTINCT ON (lt.transfer_id)
+                lt.transfer_id,
+                t.to_team_id   AS return_to_team_id,
+                t.from_team_id AS return_from_team_id,
+                t.isloan       AS return_isloan,
+                t.fee          AS return_fee,
+                t.player_value AS return_player_value,
+                t.transfer_date AS return_date,
+                t.season       AS return_season,
+                t.season_str   AS return_season_str
+            FROM lt
+            JOIN transfers t ON t.player_id    = lt.player_id
+                             AND t.from_team_id = lt.loan_team_id
+                             AND t.transfer_date > lt.loan_start_date
+            ORDER BY lt.transfer_id, t.transfer_date ASC
+        ),
+        lc AS (
+            SELECT DISTINCT
+                lt.transfer_id,
+                lt.player_id,
+                lt.loan_team_id,
+                pcs.competition_id
+            FROM lt
+            JOIN player_comp_stats pcs ON pcs.player_id = lt.player_id
+                                      AND pcs.team_id   = lt.loan_team_id
+            JOIN competitions comp ON comp.competition_id = pcs.competition_id
+            JOIN leagues lf        ON lf.league_id        = comp.league_id
+            WHERE (lf.competition_level IS NULL OR lf.competition_level != 'national')
+              AND comp.season_year BETWEEN :start_year AND :end_year
+        ),
+        pcs_data AS (
+            SELECT
+                lc.transfer_id,
+                lc.player_id,
+                lc.competition_id,
+                SUM(pcs.games_played)   AS gp,
+                SUM(pcs.minutes)        AS minutes,
+                ROUND(SUM(pcs.minutes)::numeric / NULLIF(SUM(pcs.games_played), 0), 1) AS mpg,
+                SUM(pcs.goals)          AS goals,
+                ROUND(SUM(pcs.goals)::numeric          * 90 / NULLIF(SUM(pcs.minutes), 0), 2) AS goals_p90,
+                SUM(pcs.assists)        AS assists,
+                ROUND(SUM(pcs.assists)::numeric        * 90 / NULLIF(SUM(pcs.minutes), 0), 2) AS assists_p90,
+                SUM(pcs.goals_assists)  AS goals_assists,
+                ROUND(SUM(pcs.goals_assists)::numeric  * 90 / NULLIF(SUM(pcs.minutes), 0), 2) AS goals_assists_p90,
+                SUM(pcs.shots)          AS shots,
+                SUM(pcs.clean_sheets)   AS clean_sheets,
+                SUM(pcs.goals_conceded) AS goals_conceded,
+                ROUND(SUM(pcs.goals_conceded)::numeric * 90 / NULLIF(SUM(pcs.minutes), 0), 2) AS goals_conceded_p90,
+                SUM(pcs.penalty_goals)  AS penalty_goals,
+                SUM(pcs.pens_att)       AS pens_att,
+                SUM(pcs.cards_yellow)   AS cards_yellow,
+                SUM(pcs.cards_red)      AS cards_red
+            FROM lc
+            JOIN player_comp_stats pcs ON pcs.player_id    = lc.player_id
+                                      AND pcs.competition_id = lc.competition_id
+                                      AND pcs.team_id       = lc.loan_team_id
+            GROUP BY lc.transfer_id, lc.player_id, lc.competition_id
+        ),
+        ptot AS (
+            SELECT
+                transfer_id,
+                player_id,
+                SUM(gp)             AS gp,
+                SUM(minutes)        AS minutes,
+                SUM(goals)          AS goals,
+                SUM(assists)        AS assists,
+                SUM(goals_assists)  AS goals_assists,
+                SUM(shots)          AS shots,
+                SUM(clean_sheets)   AS clean_sheets,
+                SUM(goals_conceded) AS goals_conceded,
+                SUM(penalty_goals)  AS penalty_goals,
+                SUM(pens_att)       AS pens_att,
+                SUM(cards_yellow)   AS cards_yellow,
+                SUM(cards_red)      AS cards_red
+            FROM pcs_data
+            GROUP BY transfer_id, player_id
+        ),
+        top_loanees AS (
+            SELECT transfer_id, player_id, {stat_col} AS sort_val
+            FROM ptot
+            ORDER BY {stat_col} DESC NULLS LAST
+            LIMIT :limit
+        ),
+        stats_agg AS (
+            SELECT
+                pd.transfer_id,
+                pd.player_id,
+                json_agg(json_build_object(
+                    'gp',                pd.gp,
+                    'minutes',           pd.minutes,
+                    'mpg',               pd.mpg,
+                    'goals',             pd.goals,
+                    'goals_p90',         pd.goals_p90,
+                    'assists',           pd.assists,
+                    'assists_p90',       pd.assists_p90,
+                    'goals_assists',     pd.goals_assists,
+                    'goals_assists_p90', pd.goals_assists_p90,
+                    'shots',             pd.shots,
+                    'clean_sheets',      pd.clean_sheets,
+                    'goals_conceded',    pd.goals_conceded,
+                    'goals_conceded_p90', pd.goals_conceded_p90,
+                    'penalty_goals',     pd.penalty_goals,
+                    'pens_att',          pd.pens_att,
+                    'cards_yellow',      pd.cards_yellow,
+                    'cards_red',         pd.cards_red,
+                    'competition', json_build_object(
+                        'competition_id', comp.competition_id,
+                        'season_year',    comp.season_year,
+                        'stage',          comp.stage,
+                        'logo_url',       comp.logo_url,
+                        'league', json_build_object(
+                            'league_id',        lf.league_id,
+                            'league_name',      lf.name,
+                            'tier_level',       lf.tier_level,
+                            'format',           lf.format,
+                            'competiton_level', lf.competition_level,
+                            'country', CASE
+                                WHEN lc_cty.country_id IS NULL THEN NULL
+                                ELSE json_build_object(
+                                    'country_id', lc_cty.country_id,
+                                    'name',       lc_cty.name,
+                                    'flag_url',   lc_cty.flag_url,
+                                    'continent',  lc_cty.continent,
+                                    'iso_code_3', lc_cty.iso_code_3
+                                )
+                            END
+                        )
+                    )
+                )) AS stats_json
+            FROM pcs_data pd
+            JOIN top_loanees tl    ON tl.transfer_id    = pd.transfer_id
+            JOIN competitions comp ON comp.competition_id = pd.competition_id
+            JOIN leagues lf        ON lf.league_id        = comp.league_id
+            LEFT JOIN countries lc_cty ON lc_cty.country_id = lf.country_id
+            GROUP BY pd.transfer_id, pd.player_id
+        )
+        SELECT json_build_object(
+            'data', COALESCE(json_agg(
+                json_build_object(
+                    'player', json_build_object(
+                        'player_name',     p.player_name,
+                        'player_id',       p.player_id,
+                        'age',             p.age,
+                        'tfm_pic_url',     p.tfm_pic_url,
+                        'pic_url',         p.pic_url,
+                        'position',        p.position,
+                        'other_positions', COALESCE(p.other_positions, ARRAY[]::text[]),
+                        'countries', json_build_object(
+                            'country1', CASE WHEN c1.country_id IS NULL THEN NULL
+                                ELSE json_build_object('country_id', c1.country_id, 'name', c1.name, 'flag_url', c1.flag_url, 'continent', c1.continent, 'iso_code_3', c1.iso_code_3) END,
+                            'country2', CASE WHEN c2.country_id IS NULL THEN NULL
+                                ELSE json_build_object('country_id', c2.country_id, 'name', c2.name, 'flag_url', c2.flag_url, 'continent', c2.continent, 'iso_code_3', c2.iso_code_3) END
+                        )
+                    ),
+                    'loan_transfer', json_build_object(
+                        'buying_team', json_build_object(
+                            'team_id',     lt_team.team_id,
+                            'team_name',   lt_team.name,
+                            'common_name', lt_team.common_name,
+                            'short_name',  lt_team.short_name,
+                            'logo_url',    lt_team.logo_url,
+                            'level',       lt_team.level,
+                            'type',        lt_team.type,
+                            'country', CASE WHEN ltc.country_id IS NULL THEN NULL
+                                ELSE json_build_object('country_id', ltc.country_id, 'name', ltc.name, 'flag_url', ltc.flag_url, 'continent', ltc.continent, 'iso_code_3', ltc.iso_code_3) END
+                        ),
+                        'selling_team', CASE WHEN lt.parent_team_id IS NULL THEN NULL ELSE json_build_object(
+                            'team_id',     st.team_id,
+                            'team_name',   st.name,
+                            'common_name', st.common_name,
+                            'short_name',  st.short_name,
+                            'logo_url',    st.logo_url,
+                            'level',       st.level,
+                            'type',        st.type,
+                            'country', CASE WHEN stc.country_id IS NULL THEN NULL
+                                ELSE json_build_object('country_id', stc.country_id, 'name', stc.name, 'flag_url', stc.flag_url, 'continent', stc.continent, 'iso_code_3', stc.iso_code_3) END
+                        ) END,
+                        'isloan',        true,
+                        'fee',           lt.fee,
+                        'player_value',  lt.player_value,
+                        'transfer_date', lt.loan_start_date::text,
+                        'season',        lt.season,
+                        'season_str',    lt.season_str
+                    ),
+                    'return_transfer', CASE WHEN rt.transfer_id IS NULL THEN NULL ELSE json_build_object(
+                        'buying_team', json_build_object(
+                            'team_id',     rt_to_team.team_id,
+                            'team_name',   rt_to_team.name,
+                            'common_name', rt_to_team.common_name,
+                            'short_name',  rt_to_team.short_name,
+                            'logo_url',    rt_to_team.logo_url,
+                            'level',       rt_to_team.level,
+                            'type',        rt_to_team.type,
+                            'country', CASE WHEN rt_to_cty.country_id IS NULL THEN NULL
+                                ELSE json_build_object('country_id', rt_to_cty.country_id, 'name', rt_to_cty.name, 'flag_url', rt_to_cty.flag_url, 'continent', rt_to_cty.continent, 'iso_code_3', rt_to_cty.iso_code_3) END
+                        ),
+                        'selling_team', json_build_object(
+                            'team_id',     rt_from_team.team_id,
+                            'team_name',   rt_from_team.name,
+                            'common_name', rt_from_team.common_name,
+                            'short_name',  rt_from_team.short_name,
+                            'logo_url',    rt_from_team.logo_url,
+                            'level',       rt_from_team.level,
+                            'type',        rt_from_team.type,
+                            'country', CASE WHEN rt_from_cty.country_id IS NULL THEN NULL
+                                ELSE json_build_object('country_id', rt_from_cty.country_id, 'name', rt_from_cty.name, 'flag_url', rt_from_cty.flag_url, 'continent', rt_from_cty.continent, 'iso_code_3', rt_from_cty.iso_code_3) END
+                        ),
+                        'isloan',        rt.return_isloan,
+                        'fee',           rt.return_fee,
+                        'player_value',  rt.return_player_value,
+                        'transfer_date', rt.return_date::text,
+                        'season',        rt.return_season,
+                        'season_str',    rt.return_season_str
+                    ) END,
+                    'stats', sa.stats_json
+                )
+                ORDER BY tl.sort_val DESC NULLS LAST
+            ), '[]'::json)
+        )
+        FROM top_loanees tl
+        JOIN lt             ON lt.transfer_id     = tl.transfer_id
+        JOIN players p      ON p.player_id        = lt.player_id
+        LEFT JOIN countries c1          ON c1.country_id  = p.country_id
+        LEFT JOIN countries c2          ON c2.country_id  = p.country2_id
+        JOIN teams lt_team              ON lt_team.team_id = lt.loan_team_id
+        LEFT JOIN countries ltc         ON ltc.country_id  = lt_team.country_id
+        LEFT JOIN teams st              ON st.team_id      = lt.parent_team_id
+        LEFT JOIN countries stc         ON stc.country_id  = st.country_id
+        LEFT JOIN rt                    ON rt.transfer_id  = tl.transfer_id
+        LEFT JOIN teams rt_to_team      ON rt_to_team.team_id  = rt.return_to_team_id
+        LEFT JOIN countries rt_to_cty   ON rt_to_cty.country_id = rt_to_team.country_id
+        LEFT JOIN teams rt_from_team    ON rt_from_team.team_id  = rt.return_from_team_id
+        LEFT JOIN countries rt_from_cty ON rt_from_cty.country_id = rt_from_team.country_id
+        JOIN stats_agg sa   ON sa.transfer_id     = tl.transfer_id
+    """)
+
+    result = session.exec(query, params=params).first()
+    return result[0] if result else {"data": []}
 
 

@@ -1,9 +1,8 @@
 from typing import List, Optional
 from pydantic import BaseModel
 
-from .utils import Country
-from .team import Team
-from .player import Player
+from .utils import Country, Player
+from .team import Team, Transfer
 
 
 class League(BaseModel):
@@ -63,18 +62,17 @@ class PlayerCompetitionStats(BaseModel):
     pens_att: Optional[int] = None
     cards_yellow: Optional[int] = None
     cards_red: Optional[int] = None
+    competition: Optional[Competition] = None
 
 
 class LeaguePlayerStats(BaseModel):
     player: Player
     teams: List[Team]
-    competitions: List[Competition]
     stats: PlayerCompetitionStats
 
 
 class LeagueStatsData(BaseModel):
     season_year: int
-    competitions: List[Competition]
     players: List[LeaguePlayerStats]
 
 
@@ -96,3 +94,14 @@ class LeagueStatsByDateData(BaseModel):
 
 class LeagueStatsbyDateResponse(BaseModel):
     data: LeagueStatsByDateData
+
+
+class BestLoanees(BaseModel):
+    player: Player
+    loan_transfer: Transfer
+    return_transfer: Optional[Transfer] = None
+    stats: List[PlayerCompetitionStats]
+
+
+class BestLoaneesResponse(BaseModel):
+    data: List[BestLoanees]

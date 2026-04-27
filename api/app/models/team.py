@@ -21,3 +21,14 @@ class TeamSearchResponse(BaseModel):
 
 class TeamResponse(BaseModel):
     data: Team
+
+
+class Transfer(BaseModel):
+    buying_team: Team
+    selling_team: Optional[Team] = None
+    isloan: Optional[bool] = None
+    fee: Optional[float] = None
+    player_value: Optional[float] = None
+    transfer_date: str
+    season: Optional[int] = None
+    season_str: Optional[str] = None
