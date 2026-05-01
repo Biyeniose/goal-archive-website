@@ -33,6 +33,7 @@ class Player(BaseModel):
     age: Optional[int] = None
     tfm_pic_url: Optional[str] = None
     pic_url: Optional[str] = None
+    pixel_pic_url: Optional[str] = None
     position: Optional[str] = None
     other_positions: List[str] = []
     countries: PlayerCountries

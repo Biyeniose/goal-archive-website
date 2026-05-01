@@ -12,7 +12,7 @@ BYDATE_STAT_COLUMNS: set[str] = {
     "shots", "minutes", "gp", "pens_made", "pens_att",
 }
 
-DEFAULT_LEAGUE_IDS: list[int] = [1,2,3,4,5,7,8, 111]
+DEFAULT_LEAGUE_IDS: list[int] = [1,2,3,4,5]
 
 DEFAULT_SEASON_YEAR: int = 2025
 

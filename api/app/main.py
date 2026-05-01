@@ -57,9 +57,15 @@ async def log_requests(request: Request, call_next):
         raise
 
 
+ALLOWED_ORIGINS = [
+    "http://dev.goal-archive.net",
+    "https://dev.goal-archive.net",
+    "http://100.77.182.222:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],

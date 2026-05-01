@@ -28,6 +28,7 @@ async def search_players(
                 'age',            p.age,
                 'tfm_pic_url',    p.tfm_pic_url,
                 'pic_url',  p.pic_url,
+                'pixel_pic_url', p.pixel_pic_url,
                 'position',       p.position,
                 'other_positions', COALESCE(p.other_positions, ARRAY[]::text[]),
                 'countries', json_build_object(
@@ -83,6 +84,7 @@ async def get_player(
                 'age',            p.age,
                 'tfm_pic_url',    p.tfm_pic_url,
                 'pic_url',  p.pic_url,
+                'pixel_pic_url', p.pixel_pic_url,
                 'position',       p.position,
                 'other_positions', COALESCE(p.other_positions, ARRAY[]::text[]),
                 'countries', json_build_object(
@@ -155,7 +157,7 @@ async def get_player_cv(
         pd AS (
             SELECT
                 p.player_name, p.player_id, p.age,
-                p.tfm_pic_url, p.pic_url, p.position,
+                p.tfm_pic_url, p.pic_url, p.pixel_pic_url, p.position,
                 COALESCE(p.other_positions, ARRAY[]::text[]) AS other_positions,
                 c1.country_id AS c1_id, c1.name AS c1_name, c1.flag_url AS c1_flag,
                 c1.continent  AS c1_cont, c1.iso_code_3 AS c1_iso,
@@ -228,6 +230,7 @@ async def get_player_cv(
                 tmc.season_start_date,
                 tmc.number,
                 comp.season_year        AS c_season_year,
+                comp.name               AS comp_name,
                 comp.stage,
                 comp.logo_url           AS c_logo,
                 l.league_id,
@@ -235,6 +238,8 @@ async def get_player_cv(
                 l.tier_level,
                 l.format,
                 l.competition_level,
+                l.scope,
+                (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = l.league_id ORDER BY c2.season_year DESC LIMIT 1) AS league_logo_url,
                 lc.country_id           AS lc_id,
                 lc.name                 AS lc_name,
                 lc.flag_url             AS lc_flag,
@@ -281,12 +286,15 @@ async def get_player_cv(
                             'tier_level',       tier_level,
                             'format',           format,
                             'competiton_level', competition_level,
+                            'scope',            scope,
+                            'logo_url',         league_logo_url,
                             'country', CASE WHEN lc_id IS NULL THEN NULL ELSE json_build_object(
                                 'country_id', lc_id, 'name', lc_name,
                                 'flag_url', lc_flag, 'continent', lc_cont,
                                 'iso_code_3', lc_iso) END
                         ),
                         'competition_id', competition_id,
+                        'name',           comp_name,
                         'season_year',    c_season_year,
                         'stage',          stage,
                         'logo_url',       c_logo
@@ -374,6 +382,7 @@ async def get_player_cv(
                         'age',             pd.age,
                         'tfm_pic_url',     pd.tfm_pic_url,
                         'pic_url',         pd.pic_url,
+                        'pixel_pic_url',   pd.pixel_pic_url,
                         'position',        pd.position,
                         'other_positions', pd.other_positions,
                         'countries', json_build_object(

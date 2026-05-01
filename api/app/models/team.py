@@ -32,3 +32,5 @@ class Transfer(BaseModel):
     transfer_date: str
     season: Optional[int] = None
     season_str: Optional[str] = None
+
+

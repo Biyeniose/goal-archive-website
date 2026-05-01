@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException
 
 from ..dependencies import DBSession, AppLoggerDep
-from ..models.league import LeagueListResponse, LeagueStandingsResponse, LeagueStatsResponse, LeagueStatsbyDateResponse, LeagueStatsByDateData, BestLoaneesResponse
+from ..models.league import LeagueListResponse, LeagueStandingsResponse, LeagueStatsResponse, LeagueStatsbyDateResponse, LeagueStatsByDateData, BestLoaneesResponse, LongestDroughtsReponse
 from ..constants import STAT_COLUMNS, BYDATE_STAT_COLUMNS, DEFAULT_LEAGUE_IDS, POSITION_GROUPS
 
 router = APIRouter(
@@ -32,6 +32,8 @@ async def list_leagues(
                     'tier_level',       l.tier_level,
                     'format',           l.format,
                     'competiton_level', l.competition_level,
+                    'scope',            l.scope,
+                    'logo_url',         (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = l.league_id ORDER BY c2.season_year DESC LIMIT 1),
                     'country', CASE
                         WHEN c.country_id IS NULL THEN NULL
                         ELSE json_build_object(
@@ -59,7 +61,7 @@ async def get_league_stats(
     season_year: int,
     session: DBSession,
     logger: AppLoggerDep,
-    league_ids: List[int] = Query(default=DEFAULT_LEAGUE_IDS, description="One or more league IDs"),
+    league_ids: List[int] = Query( description="One or more league IDs"),
     stat: str = Query("goals", description=f"Stat to sort by: {', '.join(sorted(STAT_COLUMNS))}"),
     limit: int = Query(15, description="Maximum number of players to return"),
     country_id: Optional[int] = Query(None, description="Filter by player primary country"),
@@ -186,6 +188,7 @@ async def get_league_stats(
                         'age',            ranked.age,
                         'tfm_pic_url',    ranked.tfm_pic_url,
                         'pic_url',  ranked.pic_url,
+                        'pixel_pic_url', ranked.pixel_pic_url,
                         'position',       ranked.position,
                         'other_positions', ranked.other_positions,
                         'countries', json_build_object(
@@ -238,7 +241,7 @@ async def get_league_stats(
             FROM (
                 SELECT tot.*, p.player_name, p.position,
                        COALESCE(p.other_positions, ARRAY[]::text[]) AS other_positions,
-                       p.tfm_pic_url, p.pic_url,
+                       p.tfm_pic_url, p.pic_url, p.pixel_pic_url,
                        p.country_id AS p_country_id, p.country2_id AS p_country2_id
                 FROM player_totals tot
                 JOIN players p ON p.player_id = tot.player_id
@@ -377,6 +380,7 @@ async def get_league_stats_bydate(
                         'age',            ranked.age,
                         'tfm_pic_url',    ranked.tfm_pic_url,
                         'pic_url',  ranked.pic_url,
+                        'pixel_pic_url', ranked.pixel_pic_url,
                         'position',       ranked.position,
                         'other_positions', ranked.other_positions,
                         'countries', json_build_object(
@@ -429,7 +433,7 @@ async def get_league_stats_bydate(
             FROM (
                 SELECT tot.*, p.player_name, p.age, p.position,
                        COALESCE(p.other_positions, ARRAY[]::text[]) AS other_positions,
-                       p.tfm_pic_url, p.pic_url,
+                       p.tfm_pic_url, p.pic_url, p.pixel_pic_url,
                        p.country_id AS p_country_id, p.country2_id AS p_country2_id
                 FROM player_totals tot
                 JOIN players p ON p.player_id = tot.player_id
@@ -672,6 +676,7 @@ async def get_best_loanees(
                     'cards_red',         pd.cards_red,
                     'competition', json_build_object(
                         'competition_id', comp.competition_id,
+                        'name',           comp.name,
                         'season_year',    comp.season_year,
                         'stage',          comp.stage,
                         'logo_url',       comp.logo_url,
@@ -681,6 +686,8 @@ async def get_best_loanees(
                             'tier_level',       lf.tier_level,
                             'format',           lf.format,
                             'competiton_level', lf.competition_level,
+                            'scope',            lf.scope,
+                            'logo_url',         (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = lf.league_id ORDER BY c2.season_year DESC LIMIT 1),
                             'country', CASE
                                 WHEN lc_cty.country_id IS NULL THEN NULL
                                 ELSE json_build_object(
@@ -710,6 +717,7 @@ async def get_best_loanees(
                         'age',             p.age,
                         'tfm_pic_url',     p.tfm_pic_url,
                         'pic_url',         p.pic_url,
+                        'pixel_pic_url',   p.pixel_pic_url,
                         'position',        p.position,
                         'other_positions', COALESCE(p.other_positions, ARRAY[]::text[]),
                         'countries', json_build_object(
@@ -803,5 +811,357 @@ async def get_best_loanees(
 
     result = session.exec(query, params=params).first()
     return result[0] if result else {"data": []}
+
+DROUGHT_STATS = {"goals", "assists", "goals_or_assists"}
+
+# get longest goal/assist droughts
+@router.get("/droughts/{season_year}", response_model=LongestDroughtsReponse)
+async def get_longest_droughts(
+    season_year: int,
+    session: DBSession,
+    logger: AppLoggerDep,
+    league_ids: List[int] = Query(default=DEFAULT_LEAGUE_IDS, description="One or more league IDs"),
+    stat: str = Query("goals", description="Drought type: goals, assists, goals_or_assists"),
+    limit: int = Query(15, description="Maximum number of players to return"),
+):
+    if stat not in DROUGHT_STATS:
+        raise HTTPException(status_code=400, detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(DROUGHT_STATS))}")
+
+    logger.info(f"Fetching droughts: league_ids={league_ids}, season_year={season_year}, stat={stat}")
+
+    if stat == "goals":
+        last_events_sql = """
+        last_events AS (
+            SELECT me.active_player_id AS player_id, MAX(m.match_date) AS last_event_date
+            FROM match_events me
+            JOIN matches m ON m.match_id = me.match_id
+            WHERE me.event_type IN ('goal', 'penalty goal')
+            GROUP BY me.active_player_id
+        ),"""
+        last_ga_filter = "me.event_type IN ('goal', 'penalty goal') AND me.active_player_id = td.player_id"
+    elif stat == "assists":
+        last_events_sql = """
+        last_events AS (
+            SELECT me.passive_player_id AS player_id, MAX(m.match_date) AS last_event_date
+            FROM match_events me
+            JOIN matches m ON m.match_id = me.match_id
+            WHERE me.passive_player_id IS NOT NULL
+              AND me.event_type NOT IN ('penalty goal', 'own goal')
+            GROUP BY me.passive_player_id
+        ),"""
+        last_ga_filter = "me.passive_player_id = td.player_id AND me.event_type NOT IN ('penalty goal', 'own goal')"
+    else:  # goals_or_assists
+        last_events_sql = """
+        last_events AS (
+            SELECT player_id, MAX(event_date) AS last_event_date
+            FROM (
+                SELECT me.active_player_id AS player_id, m.match_date AS event_date
+                FROM match_events me
+                JOIN matches m ON m.match_id = me.match_id
+                WHERE me.event_type IN ('goal', 'penalty goal')
+                UNION ALL
+                SELECT me.passive_player_id AS player_id, m.match_date AS event_date
+                FROM match_events me
+                JOIN matches m ON m.match_id = me.match_id
+                WHERE me.passive_player_id IS NOT NULL
+                  AND me.event_type NOT IN ('penalty goal', 'own goal')
+            ) evt
+            GROUP BY player_id
+        ),"""
+        last_ga_filter = "(me.event_type IN ('goal', 'penalty goal') AND me.active_player_id = td.player_id) OR (me.passive_player_id = td.player_id AND me.event_type NOT IN ('penalty goal', 'own goal'))"
+
+    params = {
+        "league_ids": league_ids,
+        "season_year": season_year,
+        "limit": limit,
+    }
+
+    query = text(f"""
+        WITH
+        selected_comps AS (
+            SELECT comp.competition_id
+            FROM competitions comp
+            WHERE comp.league_id = ANY(:league_ids)
+              AND comp.season_year = :season_year
+        ),
+        selected_matches AS (
+            SELECT m.match_id, m.match_date, m.comp_id,
+                   m.home_id AS home_team_id, m.away_id AS away_team_id,
+                   m.home_goals, m.away_goals, m.isdraw
+            FROM matches m
+            JOIN selected_comps sc ON sc.competition_id = m.comp_id
+        ),
+        active_players AS (
+            SELECT pms.player_id
+            FROM player_match_stats pms
+            JOIN selected_matches sm ON sm.match_id = pms.match_id
+            JOIN players p2 ON p2.player_id = pms.player_id
+            WHERE pms.minutes > 0
+              AND p2.position = ANY(ARRAY[
+                  'Centre-Forward', 'Second Striker',
+                  'Right Winger', 'Left Winger', 'Left Midfield', 'Right Midfield'
+              ])
+            GROUP BY pms.player_id
+            HAVING COUNT(DISTINCT pms.match_id) > 3
+        ),
+        {last_events_sql}
+        player_drought_stats AS (
+            SELECT
+                ap.player_id,
+                le.last_event_date,
+                COUNT(DISTINCT pms.match_id)   AS gp,
+                SUM(pms.minutes)               AS total_minutes,
+                ROUND(SUM(pms.minutes)::numeric / NULLIF(COUNT(DISTINCT pms.match_id), 0), 1) AS mpg,
+                MAX(sm.match_date)             AS last_match_date
+            FROM active_players ap
+            JOIN last_events le ON le.player_id = ap.player_id
+            JOIN player_match_stats pms ON pms.player_id = ap.player_id AND pms.minutes > 0
+            JOIN selected_matches sm    ON sm.match_id   = pms.match_id
+            WHERE sm.match_date > le.last_event_date
+            GROUP BY ap.player_id, le.last_event_date
+            HAVING COUNT(DISTINCT pms.match_id) > 3
+        ),
+        top_droughts AS (
+            SELECT *,
+                   (last_match_date - last_event_date)::int AS days
+            FROM player_drought_stats
+            ORDER BY (last_match_date - last_event_date) DESC NULLS LAST
+            LIMIT :limit
+        ),
+        drought_team_matches AS (
+            SELECT DISTINCT td.player_id, pms.team_id
+            FROM top_droughts td
+            JOIN player_match_stats pms ON pms.player_id = td.player_id AND pms.minutes > 0
+            JOIN selected_matches sm    ON sm.match_id   = pms.match_id
+            WHERE sm.match_date > td.last_event_date
+        ),
+        drought_teams_agg AS (
+            SELECT
+                dtm.player_id,
+                json_agg(json_build_object(
+                    'team_id',     t.team_id,
+                    'team_name',   t.name,
+                    'common_name', t.common_name,
+                    'short_name',  t.short_name,
+                    'logo_url',    t.logo_url,
+                    'level',       t.level,
+                    'type',        t.type,
+                    'country', CASE WHEN tc.country_id IS NULL THEN NULL
+                        ELSE json_build_object('country_id', tc.country_id, 'name', tc.name, 'flag_url', tc.flag_url, 'continent', tc.continent, 'iso_code_3', tc.iso_code_3) END
+                )) AS teams_json
+            FROM drought_team_matches dtm
+            JOIN teams t         ON t.team_id    = dtm.team_id
+            LEFT JOIN countries tc ON tc.country_id = t.country_id
+            GROUP BY dtm.player_id
+        ),
+        drought_comp_matches AS (
+            SELECT DISTINCT td.player_id, sm.comp_id
+            FROM top_droughts td
+            JOIN player_match_stats pms ON pms.player_id = td.player_id AND pms.minutes > 0
+            JOIN selected_matches sm    ON sm.match_id   = pms.match_id
+            WHERE sm.match_date > td.last_event_date
+        ),
+        drought_comps_agg AS (
+            SELECT
+                dcm.player_id,
+                json_agg(json_build_object(
+                    'competition_id', comp.competition_id,
+                    'name',           comp.name,
+                    'season_year',    comp.season_year,
+                    'stage',          comp.stage,
+                    'logo_url',       comp.logo_url,
+                    'league', json_build_object(
+                        'league_id',        l.league_id,
+                        'league_name',      l.name,
+                        'tier_level',       l.tier_level,
+                        'format',           l.format,
+                        'competiton_level', l.competition_level,
+                        'scope',            l.scope,
+                        'logo_url',         (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = l.league_id ORDER BY c2.season_year DESC LIMIT 1),
+                        'country', CASE WHEN lc.country_id IS NULL THEN NULL
+                            ELSE json_build_object('country_id', lc.country_id, 'name', lc.name, 'flag_url', lc.flag_url, 'continent', lc.continent, 'iso_code_3', lc.iso_code_3) END
+                    )
+                )) AS comps_json
+            FROM drought_comp_matches dcm
+            JOIN competitions comp ON comp.competition_id = dcm.comp_id
+            JOIN leagues l         ON l.league_id         = comp.league_id
+            LEFT JOIN countries lc ON lc.country_id       = l.country_id
+            GROUP BY dcm.player_id
+        ),
+        last_match_data AS (
+            SELECT DISTINCT ON (td.player_id)
+                td.player_id,
+                sm.match_id,
+                sm.match_date,
+                sm.home_team_id,
+                sm.away_team_id,
+                sm.home_goals,
+                sm.away_goals,
+                sm.isdraw,
+                sm.comp_id
+            FROM top_droughts td
+            JOIN player_match_stats pms ON pms.player_id = td.player_id AND pms.minutes > 0
+            JOIN selected_matches sm    ON sm.match_id   = pms.match_id
+            WHERE sm.match_date > td.last_event_date
+            ORDER BY td.player_id, sm.match_date DESC, sm.match_id DESC
+        ),
+        last_ga_match_data AS (
+            SELECT DISTINCT ON (td.player_id)
+                td.player_id,
+                m.match_id,
+                m.match_date,
+                m.home_id   AS home_team_id,
+                m.away_id   AS away_team_id,
+                m.home_goals,
+                m.away_goals,
+                m.isdraw,
+                m.comp_id
+            FROM top_droughts td
+            JOIN match_events me ON {last_ga_filter}
+            JOIN matches m       ON m.match_id   = me.match_id
+                                AND m.match_date = td.last_event_date
+            ORDER BY td.player_id, m.match_id DESC
+        )
+        SELECT json_build_object(
+            'data', COALESCE(json_agg(
+                json_build_object(
+                    'player', json_build_object(
+                        'player_name',     p.player_name,
+                        'player_id',       p.player_id,
+                        'age',             p.age,
+                        'tfm_pic_url',     p.tfm_pic_url,
+                        'pic_url',         p.pic_url,
+                        'pixel_pic_url',   p.pixel_pic_url,
+                        'position',        p.position,
+                        'other_positions', COALESCE(p.other_positions, ARRAY[]::text[]),
+                        'countries', json_build_object(
+                            'country1', CASE WHEN c1.country_id IS NULL THEN NULL ELSE json_build_object('country_id', c1.country_id, 'name', c1.name, 'flag_url', c1.flag_url, 'continent', c1.continent, 'iso_code_3', c1.iso_code_3) END,
+                            'country2', CASE WHEN c2.country_id IS NULL THEN NULL ELSE json_build_object('country_id', c2.country_id, 'name', c2.name, 'flag_url', c2.flag_url, 'continent', c2.continent, 'iso_code_3', c2.iso_code_3) END
+                        )
+                    ),
+                    'teams',        dta.teams_json,
+                    'competitions', dca.comps_json,
+                    'days',         td.days,
+                    'gp',           td.gp,
+                    'mpg',          td.mpg,
+                    'last_match', json_build_object(
+                        'match_id',   lmd.match_id,
+                        'match_date', lmd.match_date::text,
+                        'home_team', json_build_object(
+                            'team_id',     ht.team_id,
+                            'team_name',   ht.name,
+                            'common_name', ht.common_name,
+                            'short_name',  ht.short_name,
+                            'logo_url',    ht.logo_url,
+                            'level',       ht.level,
+                            'type',        ht.type,
+                            'country', CASE WHEN htc.country_id IS NULL THEN NULL ELSE json_build_object('country_id', htc.country_id, 'name', htc.name, 'flag_url', htc.flag_url, 'continent', htc.continent, 'iso_code_3', htc.iso_code_3) END
+                        ),
+                        'home_goals', lmd.home_goals,
+                        'away_team', json_build_object(
+                            'team_id',     at2.team_id,
+                            'team_name',   at2.name,
+                            'common_name', at2.common_name,
+                            'short_name',  at2.short_name,
+                            'logo_url',    at2.logo_url,
+                            'level',       at2.level,
+                            'type',        at2.type,
+                            'country', CASE WHEN atc.country_id IS NULL THEN NULL ELSE json_build_object('country_id', atc.country_id, 'name', atc.name, 'flag_url', atc.flag_url, 'continent', atc.continent, 'iso_code_3', atc.iso_code_3) END
+                        ),
+                        'away_goals', lmd.away_goals,
+                        'isdraw',     lmd.isdraw,
+                        'competition', json_build_object(
+                            'competition_id', mcomp.competition_id,
+                            'name',           mcomp.name,
+                            'season_year',    mcomp.season_year,
+                            'stage',          mcomp.stage,
+                            'logo_url',       mcomp.logo_url,
+                            'league', json_build_object(
+                                'league_id',        ml.league_id,
+                                'league_name',      ml.name,
+                                'tier_level',       ml.tier_level,
+                                'format',           ml.format,
+                                'competiton_level', ml.competition_level,
+                                'scope',            ml.scope,
+                                'logo_url',         (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = ml.league_id ORDER BY c2.season_year DESC LIMIT 1),
+                                'country', CASE WHEN mlc.country_id IS NULL THEN NULL ELSE json_build_object('country_id', mlc.country_id, 'name', mlc.name, 'flag_url', mlc.flag_url, 'continent', mlc.continent, 'iso_code_3', mlc.iso_code_3) END
+                            )
+                        )
+                    ),
+                    'last_match_ga', CASE WHEN lgamd.match_id IS NULL THEN NULL ELSE json_build_object(
+                        'match_id',   lgamd.match_id,
+                        'match_date', lgamd.match_date::text,
+                        'home_team', json_build_object(
+                            'team_id',     gaht.team_id,
+                            'team_name',   gaht.name,
+                            'common_name', gaht.common_name,
+                            'short_name',  gaht.short_name,
+                            'logo_url',    gaht.logo_url,
+                            'level',       gaht.level,
+                            'type',        gaht.type,
+                            'country', CASE WHEN gahtc.country_id IS NULL THEN NULL ELSE json_build_object('country_id', gahtc.country_id, 'name', gahtc.name, 'flag_url', gahtc.flag_url, 'continent', gahtc.continent, 'iso_code_3', gahtc.iso_code_3) END
+                        ),
+                        'home_goals', lgamd.home_goals,
+                        'away_team', json_build_object(
+                            'team_id',     gaat.team_id,
+                            'team_name',   gaat.name,
+                            'common_name', gaat.common_name,
+                            'short_name',  gaat.short_name,
+                            'logo_url',    gaat.logo_url,
+                            'level',       gaat.level,
+                            'type',        gaat.type,
+                            'country', CASE WHEN gaatc.country_id IS NULL THEN NULL ELSE json_build_object('country_id', gaatc.country_id, 'name', gaatc.name, 'flag_url', gaatc.flag_url, 'continent', gaatc.continent, 'iso_code_3', gaatc.iso_code_3) END
+                        ),
+                        'away_goals', lgamd.away_goals,
+                        'isdraw',     lgamd.isdraw,
+                        'competition', json_build_object(
+                            'competition_id', gacomp.competition_id,
+                            'name',           gacomp.name,
+                            'season_year',    gacomp.season_year,
+                            'stage',          gacomp.stage,
+                            'logo_url',       gacomp.logo_url,
+                            'league', json_build_object(
+                                'league_id',        gaml.league_id,
+                                'league_name',      gaml.name,
+                                'tier_level',       gaml.tier_level,
+                                'format',           gaml.format,
+                                'competiton_level', gaml.competition_level,
+                                'scope',            gaml.scope,
+                                'logo_url',         (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = gaml.league_id ORDER BY c2.season_year DESC LIMIT 1),
+                                'country', CASE WHEN gamlc.country_id IS NULL THEN NULL ELSE json_build_object('country_id', gamlc.country_id, 'name', gamlc.name, 'flag_url', gamlc.flag_url, 'continent', gamlc.continent, 'iso_code_3', gamlc.iso_code_3) END
+                            )
+                        )
+                    ) END
+                )
+                ORDER BY td.days DESC NULLS LAST
+            ), '[]'::json)
+        )
+        FROM top_droughts td
+        JOIN players p         ON p.player_id    = td.player_id
+        LEFT JOIN countries c1 ON c1.country_id  = p.country_id
+        LEFT JOIN countries c2 ON c2.country_id  = p.country2_id
+        JOIN drought_teams_agg dta ON dta.player_id = td.player_id
+        JOIN drought_comps_agg dca ON dca.player_id = td.player_id
+        JOIN last_match_data lmd        ON lmd.player_id   = td.player_id
+        JOIN teams ht                   ON ht.team_id      = lmd.home_team_id
+        LEFT JOIN countries htc         ON htc.country_id  = ht.country_id
+        JOIN teams at2                  ON at2.team_id     = lmd.away_team_id
+        LEFT JOIN countries atc         ON atc.country_id  = at2.country_id
+        JOIN competitions mcomp         ON mcomp.competition_id = lmd.comp_id
+        JOIN leagues ml                 ON ml.league_id    = mcomp.league_id
+        LEFT JOIN countries mlc         ON mlc.country_id  = ml.country_id
+        LEFT JOIN last_ga_match_data lgamd ON lgamd.player_id = td.player_id
+        LEFT JOIN teams gaht               ON gaht.team_id    = lgamd.home_team_id
+        LEFT JOIN countries gahtc          ON gahtc.country_id = gaht.country_id
+        LEFT JOIN teams gaat               ON gaat.team_id    = lgamd.away_team_id
+        LEFT JOIN countries gaatc          ON gaatc.country_id = gaat.country_id
+        LEFT JOIN competitions gacomp      ON gacomp.competition_id = lgamd.comp_id
+        LEFT JOIN leagues gaml             ON gaml.league_id  = gacomp.league_id
+        LEFT JOIN countries gamlc          ON gamlc.country_id = gaml.country_id
+    """)
+
+    result = session.exec(query, params=params).first()
+    return result[0] if result else {"data": []}
+
 
 

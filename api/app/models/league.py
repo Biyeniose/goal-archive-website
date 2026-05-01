@@ -11,12 +11,15 @@ class League(BaseModel):
     country: Optional[Country] = None
     tier_level: Optional[str] = None
     format: Optional[str] = None
+    scope: Optional[str] = None
     competiton_level: Optional[str] = None
+    logo_url: Optional[str] = None
 
 
 class Competition(BaseModel):
     league: League
     competition_id: int
+    name: str
     season_year: int
     stage: Optional[str] = None
     logo_url: Optional[str] = None
@@ -105,3 +108,32 @@ class BestLoanees(BaseModel):
 
 class BestLoaneesResponse(BaseModel):
     data: List[BestLoanees]
+
+
+# lightweight match summary used by drought response
+class DroughtLastMatch(BaseModel):
+    match_id: int
+    match_date: Optional[str] = None
+    home_team: Team
+    home_goals: Optional[int] = None
+    away_team: Team
+    away_goals: Optional[int] = None
+    isdraw: Optional[bool] = None
+    competition: Optional[Competition] = None
+
+
+class LongestDroughts(BaseModel):
+    player: Player
+    teams: List[Team]
+    competitions: List[Competition]
+    days: int
+    gp: int
+    mpg: float
+    last_match: Optional[DroughtLastMatch] = None
+    last_match_ga: Optional[DroughtLastMatch] = None
+    
+
+
+class LongestDroughtsReponse(BaseModel):
+    data: List[LongestDroughts]
+

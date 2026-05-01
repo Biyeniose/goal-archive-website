@@ -23,12 +23,15 @@ _BASE_COLS = """
     l.tier_level,
     l.format,
     l.competition_level,
+    l.scope,
+    (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = l.league_id ORDER BY c2.season_year DESC LIMIT 1) AS league_logo_url,
     lc.country_id       AS lc_id,
     lc.name             AS lc_name,
     lc.flag_url         AS lc_flag,
     lc.continent        AS lc_continent,
     lc.iso_code_3       AS lc_iso,
     comp.competition_id,
+    comp.name           AS comp_name,
     comp.season_year,
     comp.stage,
     comp.logo_url       AS comp_logo,
@@ -38,6 +41,8 @@ _BASE_COLS = """
     m.home_goals,
     m.pen_home_goals,
     m.away_goals,
+    m.home_pass_succ,
+    m.away_pass_succ,
     m.win_team          AS win_team_id,
     m.loss_team         AS loss_team_id,
     m.isdraw,
@@ -88,12 +93,15 @@ _COMP_OBJ_EXPR = """json_build_object(
         'tier_level',       tier_level,
         'format',           format,
         'competiton_level', competition_level,
+        'scope',            scope,
+        'logo_url',         league_logo_url,
         'country', CASE WHEN lc_id IS NULL THEN NULL ELSE json_build_object(
             'country_id', lc_id, 'name', lc_name,
             'flag_url', lc_flag, 'continent', lc_continent, 'iso_code_3', lc_iso
         ) END
     ),
     'competition_id', competition_id,
+    'name',           comp_name,
     'season_year',    season_year,
     'stage',          stage,
     'logo_url',       comp_logo
@@ -121,8 +129,16 @@ _MATCH_OBJ = """json_build_object(
             'country_id', htc_id, 'name', htc_name, 'flag_url', htc_flag,
             'continent', htc_continent, 'iso_code_3', htc_iso) END
     ),
-    'home_goals',      home_goals,
-    'pen_home_goals',  pen_home_goals,
+    'home_stats', json_build_object(
+        'goals',         home_goals,
+        'penalty_goals', pen_home_goals,
+        'shots',         NULL,
+        'possesion',     NULL,
+        'offsides',      NULL,
+        'corners',       NULL,
+        'xg',            NULL,
+        'pass_succ',     home_pass_succ
+    ),
     'away_team', json_build_object(
         'team_id',     at_id,     'team_name',   at_name,
         'common_name', at_common, 'short_name',  at_short,
@@ -132,7 +148,16 @@ _MATCH_OBJ = """json_build_object(
             'country_id', atc_id, 'name', atc_name, 'flag_url', atc_flag,
             'continent', atc_continent, 'iso_code_3', atc_iso) END
     ),
-    'away_goals',      away_goals,
+    'away_stats', json_build_object(
+        'goals',         away_goals,
+        'penalty_goals', NULL,
+        'shots',         NULL,
+        'possesion',     NULL,
+        'offsides',      NULL,
+        'corners',       NULL,
+        'xg',            NULL,
+        'pass_succ',     away_pass_succ
+    ),
     'win_team_id',     win_team_id,
     'loss_team_id',    loss_team_id,
     'isdraw',          isdraw,
@@ -159,29 +184,6 @@ _AGG_EXPR = """COALESCE(json_agg(json_build_object(
 _AGG_FROM = """FROM comp_data cd
     JOIN match_objs mo ON mo.competition_id = cd.competition_id"""
 
-
-def _fetch_match_history(session, where_sql: str, params: dict, limit: int = 5):
-    """Returns List[MatchesByComp]; used by bydate-adjacent callers."""
-    query = text(f"""
-        WITH recent AS (
-            SELECT m.match_id
-            FROM matches m
-            WHERE {where_sql}
-            ORDER BY m.match_date DESC
-            LIMIT {limit}
-        ),
-        base AS (
-            SELECT {_BASE_COLS}
-            {_BASE_JOINS}
-            WHERE m.match_id IN (SELECT match_id FROM recent)
-        ),
-        {_COMP_DATA_CTE},
-        {_MATCH_OBJS_CTE}
-        SELECT {_AGG_EXPR}
-        {_AGG_FROM}
-    """)
-    result = session.exec(query, params=params).first()
-    return result[0] or []
 
 
 # ─── bydate route ────────────────────────────────────────────────────────────
@@ -228,7 +230,7 @@ async def get_match_data(
         WITH
         -- ── flags ──────────────────────────────────────────────────────────
         match_flags AS (
-            SELECT m.home_id, m.away_id, m.match_date,
+            SELECT m.home_id, m.away_id, m.match_date, m.comp_id,
                    (ht.type = 'national' AND awt.type = 'national') AS is_intl
             FROM matches m
             JOIN teams ht  ON ht.team_id  = m.home_id
@@ -244,7 +246,7 @@ async def get_match_data(
                 pms.goals, pms.assists, pms.goals_assists,
                 pms.pens_made, pms.pens_att,
                 pms.xg::float AS xg, pms.xg_assist::float AS xg_assist, pms.xga::float AS xga,
-                pms.shots, pms.touches, pms.blocks, pms.take_ons_won,
+                pms.shots, pms.touches, pms.blocks, pms.take_ons_won, pms.tweet_mentions,
                 pms.age AS match_age,
                 club.club_id, club.club_name, club.club_common, club.club_short,
                 club.club_logo, club.club_level, club.club_type,
@@ -316,6 +318,7 @@ async def get_match_data(
                         'age',             pb.match_age,
                         'tfm_pic_url',     p.tfm_pic_url,
                         'pic_url',         p.pic_url,
+                        'pixel_pic_url',   p.pixel_pic_url,
                         'position',        p.position,
                         'other_positions', COALESCE(p.other_positions, ARRAY[]::text[]),
                         'countries', json_build_object(
@@ -347,8 +350,9 @@ async def get_match_data(
                     'shots',         pb.shots,
                     'headed_shots',  NULL,
                     'touches',       pb.touches,
-                    'blocks',        pb.blocks,
-                    'succ_dribbles', pb.take_ons_won,
+                    'blocks',         pb.blocks,
+                    'succ_dribbles',  pb.take_ons_won,
+                    'tweet_mentions', pb.tweet_mentions,
                     'current_team', CASE WHEN mf.is_intl AND pb.club_id IS NOT NULL
                         THEN json_build_object(
                             'team_id',     pb.club_id,   'team_name',   pb.club_name,
@@ -409,6 +413,7 @@ async def get_match_data(
                     'age',             ap.age,
                     'tfm_pic_url',     ap.tfm_pic_url,
                     'pic_url',         ap.pic_url,
+                    'pixel_pic_url',   ap.pixel_pic_url,
                     'position',        ap.position,
                     'other_positions', COALESCE(ap.other_positions, ARRAY[]::text[]),
                     'countries', json_build_object(
@@ -428,6 +433,7 @@ async def get_match_data(
                     'age',             pp.age,
                     'tfm_pic_url',     pp.tfm_pic_url,
                     'pic_url',         pp.pic_url,
+                    'pixel_pic_url',   pp.pixel_pic_url,
                     'position',        pp.position,
                     'other_positions', COALESCE(pp.other_positions, ARRAY[]::text[]),
                     'countries', json_build_object(
@@ -460,7 +466,8 @@ async def get_match_data(
             WHERE ((m.home_id = mf.home_id AND m.away_id = mf.away_id)
                 OR (m.home_id = mf.away_id AND m.away_id = mf.home_id))
             AND m.isplayed = true AND m.match_id != :match_id
-            ORDER BY m.match_date DESC LIMIT 5
+            AND m.match_date < mf.match_date
+            ORDER BY m.match_date DESC LIMIT 6
         ),
         h2h_base AS (
             SELECT {_BASE_COLS}
@@ -491,7 +498,8 @@ async def get_match_data(
             FROM matches m, match_flags mf
             WHERE (m.home_id = mf.home_id OR m.away_id = mf.home_id)
             AND m.isplayed = true AND m.match_id != :match_id
-            ORDER BY m.match_date DESC LIMIT 5
+            AND m.match_date < mf.match_date
+            ORDER BY m.match_date DESC LIMIT 6
         ),
         home_last5_base AS (
             SELECT {_BASE_COLS}
@@ -522,7 +530,8 @@ async def get_match_data(
             FROM matches m, match_flags mf
             WHERE (m.home_id = mf.away_id OR m.away_id = mf.away_id)
             AND m.isplayed = true AND m.match_id != :match_id
-            ORDER BY m.match_date DESC LIMIT 5
+            AND m.match_date < mf.match_date
+            ORDER BY m.match_date DESC LIMIT 6
         ),
         away_last5_base AS (
             SELECT {_BASE_COLS}
@@ -545,6 +554,98 @@ async def get_match_data(
             )), '[]'::json) AS result
             FROM away_last5_comp_data cd
             JOIN away_last5_match_objs mo ON mo.competition_id = cd.competition_id
+        ),
+
+        -- ── league table end-of-day ──────────────────────────────────────────
+        is_league_comp AS (
+            SELECT 1
+            FROM competitions comp, match_flags mf
+            WHERE comp.competition_id = mf.comp_id
+              AND comp.stage = 'league'
+              AND comp.stage_order = 1
+        ),
+        comp_matches_eod AS (
+            SELECT m.home_id, m.away_id, m.home_goals, m.away_goals
+            FROM matches m, match_flags mf
+            WHERE m.comp_id = mf.comp_id
+              AND m.match_date <= mf.match_date
+              AND m.isplayed = true
+        ),
+        team_match_stats_eod AS (
+            SELECT home_id AS team_id, 1 AS played,
+                   CASE WHEN home_goals > away_goals THEN 1 ELSE 0 END AS wins,
+                   CASE WHEN home_goals = away_goals THEN 1 ELSE 0 END AS draws,
+                   CASE WHEN home_goals < away_goals THEN 1 ELSE 0 END AS losses,
+                   COALESCE(home_goals, 0) AS goals_for,
+                   COALESCE(away_goals, 0) AS goals_against
+            FROM comp_matches_eod
+            UNION ALL
+            SELECT away_id AS team_id, 1 AS played,
+                   CASE WHEN away_goals > home_goals THEN 1 ELSE 0 END AS wins,
+                   CASE WHEN away_goals = home_goals THEN 1 ELSE 0 END AS draws,
+                   CASE WHEN away_goals < home_goals THEN 1 ELSE 0 END AS losses,
+                   COALESCE(away_goals, 0) AS goals_for,
+                   COALESCE(home_goals, 0) AS goals_against
+            FROM comp_matches_eod
+        ),
+        team_totals_eod AS (
+            SELECT
+                team_id,
+                SUM(played)::int                              AS gp,
+                SUM(wins)::int                               AS wins,
+                SUM(draws)::int                              AS draws,
+                SUM(losses)::int                             AS losses,
+                SUM(goals_for)::int                          AS goals_f,
+                SUM(goals_against)::int                      AS goals_a,
+                (SUM(goals_for) - SUM(goals_against))::int   AS gd,
+                (SUM(wins) * 3 + SUM(draws))::int            AS points
+            FROM team_match_stats_eod
+            GROUP BY team_id
+        ),
+        ranked_teams_eod AS (
+            SELECT
+                ROW_NUMBER() OVER (ORDER BY tt.points DESC, tt.gd DESC, tt.goals_f DESC)::text AS rank,
+                tt.team_id, tt.gp, tt.wins, tt.draws, tt.losses,
+                tt.goals_f, tt.goals_a, tt.gd, tt.points,
+                t.name AS team_name, t.common_name, t.short_name, t.logo_url, t.level, t.type,
+                tc.country_id AS tc_id, tc.name AS tc_name, tc.flag_url AS tc_flag,
+                tc.continent AS tc_cont, tc.iso_code_3 AS tc_iso
+            FROM team_totals_eod tt
+            JOIN teams t ON t.team_id = tt.team_id
+            LEFT JOIN countries tc ON tc.country_id = t.country_id
+        ),
+        league_ranks_eod_agg AS (
+            SELECT
+                CASE WHEN EXISTS (SELECT 1 FROM is_league_comp)
+                    THEN (
+                        SELECT COALESCE(json_agg(json_build_object(
+                            'rank',    rt.rank,
+                            'team', json_build_object(
+                                'team_id',     rt.team_id,
+                                'team_name',   rt.team_name,
+                                'common_name', rt.common_name,
+                                'short_name',  rt.short_name,
+                                'logo_url',    rt.logo_url,
+                                'level',       rt.level,
+                                'type',        rt.type,
+                                'country', CASE WHEN rt.tc_id IS NULL THEN NULL ELSE json_build_object(
+                                    'country_id', rt.tc_id,  'name',      rt.tc_name,
+                                    'flag_url',   rt.tc_flag, 'continent', rt.tc_cont,
+                                    'iso_code_3', rt.tc_iso) END
+                            ),
+                            'gp',      rt.gp,
+                            'wins',    rt.wins,
+                            'draws',   rt.draws,
+                            'losses',  rt.losses,
+                            'goals_f', rt.goals_f,
+                            'goals_a', rt.goals_a,
+                            'gd',      rt.gd,
+                            'points',  rt.points
+                        ) ORDER BY rt.rank::int), '[]'::json)
+                        FROM ranked_teams_eod rt
+                    )
+                    ELSE NULL
+                END AS rankings
         )
 
         -- ── final assembly ───────────────────────────────────────────────────
@@ -552,6 +653,7 @@ async def get_match_data(
             'data', json_build_object(
                 'match', json_build_object(
                     'match_id',        m.match_id,
+                    'competition_id',  m.comp_id,
                     'match_date',      m.match_date::text,
                     'match_time_utc',  m.match_time_utc::text,
                     'win_team_id',     m.win_team,
@@ -641,10 +743,11 @@ async def get_match_data(
                         'x11_dist',   (SELECT dist   FROM x11_dist_agg   WHERE team_id = awt.team_id)
                     )
                 ),
-                'events',     (SELECT events FROM events_agg),
-                'h2h',        (SELECT result FROM h2h_agg),
-                'home_last5', (SELECT result FROM home_last5_agg),
-                'away_last5', (SELECT result FROM away_last5_agg)
+                'events',           (SELECT events FROM events_agg),
+                'h2h',              (SELECT result FROM h2h_agg),
+                'home_last5',       (SELECT result FROM home_last5_agg),
+                'away_last5',       (SELECT result FROM away_last5_agg),
+                'league_ranks_eod', (SELECT rankings FROM league_ranks_eod_agg)
             )
         )
         FROM matches m
@@ -666,3 +769,5 @@ async def get_match_data(
     if not result or not result[0]:
         raise HTTPException(status_code=404, detail="Match not found")
     return result[0]
+
+
