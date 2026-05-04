@@ -37,6 +37,7 @@ class TeamRank(BaseModel):
     draws: Optional[int] = None
     goals_f: Optional[int] = None
     goals_a: Optional[int] = None
+    
 
 
 class LeagueListResponse(BaseModel):

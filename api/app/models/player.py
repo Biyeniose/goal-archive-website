@@ -10,10 +10,6 @@ class PlayerSearchResponse(BaseModel):
     data: List[Player]
 
 
-class PlayerDetailResponse(BaseModel):
-    data: Player
-
-
 # /players/cv
 class CompetitionStats(BaseModel):
     competition: Competition

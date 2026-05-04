@@ -14,11 +14,16 @@ BYDATE_STAT_COLUMNS: set[str] = {
 
 DEFAULT_LEAGUE_IDS: list[int] = [1,2,3,4,5]
 
-DEFAULT_SEASON_YEAR: int = 2025
-
 POSITION_GROUPS: dict = {
     "defender":   ["Left-Back", "Right-Back", "Centre-Back", "Sweeper"],
     "midfielder": ["Central Midfield", "Defensive Midfield", "Attacking Midfield"],
     "wingers":    ["Right Winger", "Left Winger", "Left Midfield", "Right Midfield"],
     "forwards":   ["Centre-Forward", "Second Striker"],
+}
+
+# Maps the canonical team name (teams.name) to additional short-form aliases
+# used when matching market names from Kalshi / Polymarket against team names.
+# Add entries here when a prediction API uses a shortened or alternate team name.
+TEAM_NAME_ALIASES: dict[str, list[str]] = {
+    "Nottingham Forest": ["Nottingham"],
 }

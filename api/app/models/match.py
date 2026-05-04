@@ -15,8 +15,30 @@ class MatchTeamStats(BaseModel):
     possesion: Optional[int] = None 
     offsides: Optional[int] = None
     corners: Optional[int] = None
-    xg: Optional[int] = None
+    xg: Optional[float] = None
+    pass_att: Optional[int] = None # passes attempted: matches.home_pass_att and .away_pass_att
     pass_succ: Optional[int] = None # succesful passes matches.home_pass_succ and .away_pass_succ
+    
+class MarketStats(BaseModel):
+    market_ticker: str
+    probability: float
+    volume: Optional[float]
+    dollar_volume: Optional[float]
+    open_interest: Optional[float]
+    open_interest_dollar: Optional[float]
+    
+
+
+class MarketMatchPrediction(BaseModel):
+    event_ticker: str
+    winner_id: Optional[int] = None
+    loser_id: Optional[int] = None
+    is_draw: bool
+    winner_stats: Optional[MarketStats]
+    loser_stats: Optional[MarketStats]
+    draw_stats: Optional[MarketStats]
+    is_correct: Optional[bool] = None
+    time_saved_utc: Optional[str] = None
 
 class Match(BaseModel):
     match_id: int
@@ -24,9 +46,10 @@ class Match(BaseModel):
     match_time_utc: Optional[str] = None
     home_team: Team
     home_stats: MatchTeamStats
+    home_color: Optional[str]
     away_team: Team
     away_stats: MatchTeamStats
-    
+    away_color: Optional[str]
     win_team_id: Optional[int] = None
     loss_team_id: Optional[int] = None
     isdraw: Optional[bool] = None
@@ -38,6 +61,11 @@ class Match(BaseModel):
     match_minute: Optional[str] = None
     round: Optional[str] = None
     gameweek_number: Optional[int] = None
+    kalshi_prediction: Optional[MarketMatchPrediction] = None
+    kalshi_prematch_prediction: Optional[MarketMatchPrediction] = None
+    polymarket_prediction: Optional[MarketMatchPrediction] = None
+    polymarket_prematch_prediction: Optional[MarketMatchPrediction] = None
+    
 
 class MatchesByComp(BaseModel):
     competition: Competition
@@ -88,9 +116,9 @@ class LineupDist(BaseModel):
 class MatchTeam(BaseModel):
     team: Team
     team_stats: MatchTeamStats
-    manager: Manager
+    manager: Optional[Manager] = None
     formation: Optional[str] = None
-    lineups: List[PlayerMatchStats]
+    lineups: Optional[List[PlayerMatchStats]] = None
     x11_dist: Optional[List[LineupDist]] = None
 
     
@@ -110,6 +138,9 @@ class MatchInfo(BaseModel):
          
     match_date: Optional[str] = None
     match_time_utc: Optional[str] = None
+    match_half_time_utc: Optional[str] = None
+    match_end_time_utc: Optional[str] = None
+    
     is_neutral: Optional[bool] = None
     isplayed: Optional[bool] = None
     is_live: Optional[bool] = None
@@ -121,7 +152,7 @@ class MatchInfo(BaseModel):
     attendance: Optional[int] = None
     capacity: Optional[int] = None
     capacity_pct: Optional[float] = None
-    referee: Referee
+    referee: Optional[Referee] = None
         
     
 class MatchEvent(BaseModel):
@@ -137,6 +168,18 @@ class MatchEvent(BaseModel):
     passive_player: Optional[Player] = None
     active_notes: Optional[str] = None
 
+class EndOfDayTable(BaseModel):
+    rank: TeamRank
+    rank_difference: int
+    points_difference: int
+    gd_difference: int
+
+class MatchStatsTimeStamp(BaseModel):
+    minute: int
+    add_minute: int
+    home_stats: Optional[MatchTeamStats]
+    away_stats: Optional[MatchTeamStats]
+
 
 class MatchDetails(BaseModel):
     match: MatchInfo
@@ -144,7 +187,8 @@ class MatchDetails(BaseModel):
     h2h: List[MatchesByComp]
     home_last5: List[MatchesByComp]
     away_last5: List[MatchesByComp]
-    league_ranks_eod: Optional[List[TeamRank]]
+    league_ranks_eod: Optional[List[EndOfDayTable]]
+    possesion_sequence: Optional[List[MatchStatsTimeStamp]]
         
 
 class MatchDetailsResponse(BaseModel):
@@ -166,3 +210,65 @@ class TeamWCData(BaseModel):
 
 class TeamWCResponse(BaseModel):
     data: TeamWCData
+
+
+# kalshi markets
+class KalshiForecastHistory(BaseModel):
+    market_ticker: str
+    end_period_ts: str 
+    probability: float # column is called raw_numerical_forecast
+
+class KalshiMarket(BaseModel):
+    market_id: str
+    ticker: str # ex: KXPGATOUR-THPC26-ANOR
+    title: str
+    name: str
+    team_id: Optional[int]
+    forecast_history: Optional[List[KalshiForecastHistory]]
+    
+
+    
+
+class KalshiForecastData(BaseModel):
+    match_id: int
+    kalshi_event_ticker: str
+    markets: List[KalshiMarket]
+    pre_match_prediction: Optional[MarketMatchPrediction] = None
+    latest_prediction: Optional[MarketMatchPrediction] = None
+    
+    
+    
+class KalshiForecastResponse(BaseModel):
+    data: KalshiForecastData
+
+# polym markets
+class PolymForecastHistory(BaseModel):
+    token_id: int
+    end_period_ts: str
+    probability: float # column is probability
+
+class PolymTokens(BaseModel):
+    market_id: int
+    token_id: int
+    outcome: str
+    forecast_history: Optional[List[PolymForecastHistory]]
+    
+class PolymMarket(BaseModel):
+    id: int
+    condition_id: str
+    question: str
+    slug: str
+    outcomes: List[str]
+    team_id: Optional[int]
+    tokens: Optional[List[PolymTokens]]
+    #forecast_history: Optional[List[PolymForecastHistory]]
+    
+class PolymForecastData(BaseModel):
+    match_id: int
+    polym_event_ticker: str
+    prediction: Optional[MarketMatchPrediction] = None
+    markets: List[PolymMarket]
+    
+class PolymForecastResponse(BaseModel):
+    data: PolymForecastData
+
