@@ -1,13 +1,19 @@
 from typing import List, Optional
 from pydantic import BaseModel
 
-from .player import Player
-
 from .league import Competition, League, TeamRank
-from .utils import Country, Manager, Referee
+from .utils import Country, Manager, Referee, Player
 
 from .team import Team
 
+class Stadium(BaseModel):
+    stadium_id: Optional[int] = None
+    stadium_name: Optional[str] = None
+    attendance: Optional[int] = None
+    capacity: Optional[int] = None
+    capacity_pct: Optional[float] = None
+    address: Optional[str] = None
+    
 class MatchTeamStats(BaseModel):
     goals: Optional[int] = None
     penalty_goals: Optional[int] = None
@@ -18,14 +24,15 @@ class MatchTeamStats(BaseModel):
     xg: Optional[float] = None
     pass_att: Optional[int] = None # passes attempted: matches.home_pass_att and .away_pass_att
     pass_succ: Optional[int] = None # succesful passes matches.home_pass_succ and .away_pass_succ
+    league_rank: Optional[int] = None
     
 class MarketStats(BaseModel):
     market_ticker: str
     probability: float
-    volume: Optional[float]
-    dollar_volume: Optional[float]
-    open_interest: Optional[float]
-    open_interest_dollar: Optional[float]
+    volume: Optional[float] = None
+    dollar_volume: Optional[float] = None
+    open_interest: Optional[float] = None
+    open_interest_dollar: Optional[float] = None
     
 
 
@@ -34,22 +41,23 @@ class MarketMatchPrediction(BaseModel):
     winner_id: Optional[int] = None
     loser_id: Optional[int] = None
     is_draw: bool
-    winner_stats: Optional[MarketStats]
-    loser_stats: Optional[MarketStats]
-    draw_stats: Optional[MarketStats]
+    winner_stats: Optional[MarketStats] = None
+    loser_stats: Optional[MarketStats] = None
+    draw_stats: Optional[MarketStats] = None
     is_correct: Optional[bool] = None
     time_saved_utc: Optional[str] = None
+    total_volume: Optional[float] = None
 
 class Match(BaseModel):
     match_id: int
     match_date: Optional[str] = None
     match_time_utc: Optional[str] = None
     home_team: Team
-    home_stats: MatchTeamStats
-    home_color: Optional[str]
+    home_stats: Optional[MatchTeamStats] = None
+    home_color: Optional[str] = None
     away_team: Team
-    away_stats: MatchTeamStats
-    away_color: Optional[str]
+    away_stats: Optional[MatchTeamStats] = None
+    away_color: Optional[str] = None
     win_team_id: Optional[int] = None
     loss_team_id: Optional[int] = None
     isdraw: Optional[bool] = None
@@ -61,6 +69,7 @@ class Match(BaseModel):
     match_minute: Optional[str] = None
     round: Optional[str] = None
     gameweek_number: Optional[int] = None
+    stadium: Optional[Stadium] = None
     kalshi_prediction: Optional[MarketMatchPrediction] = None
     kalshi_prematch_prediction: Optional[MarketMatchPrediction] = None
     polymarket_prediction: Optional[MarketMatchPrediction] = None
@@ -77,6 +86,8 @@ class MatchesByDateResponse(BaseModel):
 # match details        
 class PlayerMatchStats(BaseModel):
     player: Player
+    match_id: int
+    #player_id: int
     team_id: int
     position: Optional[str] = None
     number: Optional[int] = None
@@ -125,6 +136,8 @@ class MatchTeam(BaseModel):
         
     
         
+
+
 class MatchInfo(BaseModel):
     match_id: int
     competition_id: int
@@ -147,11 +160,7 @@ class MatchInfo(BaseModel):
     match_minute: Optional[str] = None
     round: Optional[str] = None
     gameweek_number: Optional[int] = None
-    stadium_id: Optional[int] = None
-    stadium_name: Optional[str] = None
-    attendance: Optional[int] = None
-    capacity: Optional[int] = None
-    capacity_pct: Optional[float] = None
+    stadium: Optional[Stadium] = None
     referee: Optional[Referee] = None
         
     
@@ -177,8 +186,8 @@ class EndOfDayTable(BaseModel):
 class MatchStatsTimeStamp(BaseModel):
     minute: int
     add_minute: int
-    home_stats: Optional[MatchTeamStats]
-    away_stats: Optional[MatchTeamStats]
+    home_stats: Optional[MatchTeamStats] = None
+    away_stats: Optional[MatchTeamStats] = None
 
 
 class MatchDetails(BaseModel):
@@ -196,20 +205,61 @@ class MatchDetailsResponse(BaseModel):
 
 
 # /teams/{team_id}/wc2026
+class PlayersFromLeague(BaseModel):
+    team_id: List[int]
+    player_id: int
+    stat_value: int
+
+class PlayerStats(BaseModel):
+    player: Player
+    stat_value: int
+
+class TeamDist(BaseModel):
+    team_id: int
+    players: List[PlayerStats]
+    stat_value: int
+
+
 class LeagueStatsDist(BaseModel):
     country: str
+    league_logos: Optional[List[str]] = None
     teams: List[Team]
     total_stat_value: int
     num_players: int
+    top_players: Optional[List[PlayersFromLeague]]
+    teams_player_dist: Optional[List[TeamDist]]
 
 
-class TeamWCData(BaseModel):
-    matches: Optional[List[Match]] = None
+class WCMatch(BaseModel):
+    competition: Competition
+    match: Match
+
+class NationDistData(BaseModel):
+    matches: Optional[List[WCMatch]] = None
     league_dist: Optional[List[LeagueStatsDist]] = None
 
 
-class TeamWCResponse(BaseModel):
-    data: TeamWCData
+class NationDistResponse(BaseModel):
+    data: NationDistData
+
+
+# competition squads
+class SquadPlayer(BaseModel):
+    player: Player
+    number: Optional[int] = None
+    club_team: Optional[Team] = None
+
+class CompetitionSquad(BaseModel):
+    team: Team
+    competition: Competition
+    matches: Optional[List[Match]] = None
+    players: Optional[List[SquadPlayer]] = None
+    manager: Optional[Manager] = None
+    date_announced: Optional[str] = None
+    type: Optional[str] = None
+
+class CompetitionSquadsResponse(BaseModel):
+    data: CompetitionSquad
 
 
 # kalshi markets

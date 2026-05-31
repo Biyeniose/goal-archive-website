@@ -65,7 +65,7 @@ _BASE_COLS = f"""
     l.format,
     l.competition_level,
     l.scope,
-    (SELECT c2.logo_url FROM competitions c2 WHERE c2.league_id = l.league_id ORDER BY c2.season_year DESC LIMIT 1) AS league_logo_url,
+    comp.logo_url AS league_logo_url,
     lc.country_id       AS lc_id,
     lc.name             AS lc_name,
     lc.flag_url         AS lc_flag,
@@ -97,6 +97,8 @@ _BASE_COLS = f"""
     m.away_pass_att,
     m.home_pass_succ,
     m.away_pass_succ,
+    m.home_ranking,
+    m.away_ranking,
     m.win_team          AS win_team_id,
     m.loss_team         AS loss_team_id,
     m.isdraw,
@@ -105,6 +107,11 @@ _BASE_COLS = f"""
     m.isplayed,
     m.round,
     m.gameweek_number,
+    m.stadium_id,
+    s.name              AS stadium_name,
+    m.attendance,
+    s.capacity          AS s_capacity,
+    s.address           AS stadium_address,
     ht.team_id          AS ht_id,
     ht.name             AS ht_name,
     ht.common_name      AS ht_common,
@@ -157,23 +164,24 @@ _BASE_COLS = f"""
         'event_ticker', kpred.event_ticker,
         'winner_id', kpred.w_id_lat, 'loser_id', kpred.l_id_lat,
         'is_draw', COALESCE(kpred.d_prob_lat,0) > COALESCE(kpred.w_prob_lat,0),
-        'winner_stats', CASE WHEN kpred.w_ticker_lat IS NULL THEN NULL ELSE json_build_object(
+        'winner_stats', CASE WHEN kpred.w_ticker_lat IS NULL OR kpred.w_prob_lat IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', kpred.w_ticker_lat, 'probability', kpred.w_prob_lat,
             'volume', kpred.w_vol, 'dollar_volume', kpred.w_dvol,
             'open_interest', kpred.w_oi, 'open_interest_dollar', kpred.w_oi_dollar
         ) END,
         'winner_prematch_stats', NULL, 'loser_prematch_stats', NULL, 'draw_prematch_stats', NULL,
-        'loser_stats', CASE WHEN kpred.l_ticker_lat IS NULL THEN NULL ELSE json_build_object(
+        'loser_stats', CASE WHEN kpred.l_ticker_lat IS NULL OR kpred.l_prob_lat IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', kpred.l_ticker_lat, 'probability', kpred.l_prob_lat,
             'volume', kpred.l_vol, 'dollar_volume', kpred.l_dvol,
             'open_interest', kpred.l_oi, 'open_interest_dollar', kpred.l_oi_dollar
         ) END,
-        'draw_stats', CASE WHEN kpred.d_ticker IS NULL THEN NULL ELSE json_build_object(
+        'draw_stats', CASE WHEN kpred.d_ticker IS NULL OR kpred.d_prob_lat IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', kpred.d_ticker, 'probability', kpred.d_prob_lat,
             'volume', kpred.d_vol, 'dollar_volume', kpred.d_dvol,
             'open_interest', kpred.d_oi, 'open_interest_dollar', kpred.d_oi_dollar
         ) END,
         'time_saved_utc', kpred.time_saved,
+        'total_volume', NULLIF(kpred.total_dvol_lat, 0),
         'is_correct', CASE
             WHEN m.isplayed = true THEN
                 CASE
@@ -202,20 +210,21 @@ _BASE_COLS = f"""
         'event_ticker', kpred.event_ticker,
         'winner_id', kpred.w_id_pre, 'loser_id', kpred.l_id_pre,
         'is_draw', COALESCE(kpred.d_prob_pre,0) > COALESCE(kpred.w_prob_pre,0),
-        'winner_stats', CASE WHEN kpred.w_ticker_pre IS NULL THEN NULL ELSE json_build_object(
+        'winner_stats', CASE WHEN kpred.w_ticker_pre IS NULL OR kpred.w_prob_pre IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', kpred.w_ticker_pre, 'probability', kpred.w_prob_pre,
             'volume', NULL, 'dollar_volume', NULL, 'open_interest', NULL, 'open_interest_dollar', NULL
         ) END,
         'winner_prematch_stats', NULL, 'loser_prematch_stats', NULL, 'draw_prematch_stats', NULL,
-        'loser_stats', CASE WHEN kpred.l_ticker_pre IS NULL THEN NULL ELSE json_build_object(
+        'loser_stats', CASE WHEN kpred.l_ticker_pre IS NULL OR kpred.l_prob_pre IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', kpred.l_ticker_pre, 'probability', kpred.l_prob_pre,
             'volume', NULL, 'dollar_volume', NULL, 'open_interest', NULL, 'open_interest_dollar', NULL
         ) END,
-        'draw_stats', CASE WHEN kpred.d_ticker IS NULL THEN NULL ELSE json_build_object(
+        'draw_stats', CASE WHEN kpred.d_ticker IS NULL OR kpred.d_prob_pre IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', kpred.d_ticker, 'probability', kpred.d_prob_pre,
             'volume', NULL, 'dollar_volume', NULL, 'open_interest', NULL, 'open_interest_dollar', NULL
         ) END,
         'time_saved_utc', kpred.time_saved,
+        'total_volume', NULLIF(kpred.total_dvol_pre, 0),
         'is_correct', CASE
             WHEN m.isplayed != true THEN NULL
             WHEN COALESCE(kpred.d_prob_pre,0) > COALESCE(kpred.w_prob_pre,0) AND m.isdraw = true THEN true
@@ -233,23 +242,24 @@ _BASE_COLS = f"""
         'event_ticker', ppred.event_ticker,
         'winner_id', ppred.w_id_lat, 'loser_id', ppred.l_id_lat,
         'is_draw', COALESCE(ppred.d_prob_lat,0) > COALESCE(ppred.w_prob_lat,0),
-        'winner_stats', CASE WHEN ppred.w_ticker_lat IS NULL THEN NULL ELSE json_build_object(
+        'winner_stats', CASE WHEN ppred.w_ticker_lat IS NULL OR ppred.w_prob_lat IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', ppred.w_ticker_lat, 'probability', ppred.w_prob_lat,
             'volume', ppred.w_vol, 'dollar_volume', NULL,
             'open_interest', ppred.w_oi, 'open_interest_dollar', NULL
         ) END,
         'winner_prematch_stats', NULL, 'loser_prematch_stats', NULL, 'draw_prematch_stats', NULL,
-        'loser_stats', CASE WHEN ppred.l_ticker_lat IS NULL THEN NULL ELSE json_build_object(
+        'loser_stats', CASE WHEN ppred.l_ticker_lat IS NULL OR ppred.l_prob_lat IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', ppred.l_ticker_lat, 'probability', ppred.l_prob_lat,
             'volume', ppred.l_vol, 'dollar_volume', NULL,
             'open_interest', ppred.l_oi, 'open_interest_dollar', NULL
         ) END,
-        'draw_stats', CASE WHEN ppred.d_ticker IS NULL THEN NULL ELSE json_build_object(
+        'draw_stats', CASE WHEN ppred.d_ticker IS NULL OR ppred.d_prob_lat IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', ppred.d_ticker, 'probability', ppred.d_prob_lat,
             'volume', ppred.d_vol, 'dollar_volume', NULL,
             'open_interest', ppred.d_oi, 'open_interest_dollar', NULL
         ) END,
         'time_saved_utc', ppred.time_saved,
+        'total_volume', NULLIF(ppred.total_vol_lat, 0),
         'is_correct', CASE
             WHEN m.isplayed = true THEN
                 CASE
@@ -278,20 +288,21 @@ _BASE_COLS = f"""
         'event_ticker', ppred.event_ticker,
         'winner_id', ppred.w_id_pre, 'loser_id', ppred.l_id_pre,
         'is_draw', COALESCE(ppred.d_prob_pre,0) > COALESCE(ppred.w_prob_pre,0),
-        'winner_stats', CASE WHEN ppred.w_ticker_pre IS NULL THEN NULL ELSE json_build_object(
+        'winner_stats', CASE WHEN ppred.w_ticker_pre IS NULL OR ppred.w_prob_pre IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', ppred.w_ticker_pre, 'probability', ppred.w_prob_pre,
             'volume', NULL, 'dollar_volume', NULL, 'open_interest', NULL, 'open_interest_dollar', NULL
         ) END,
         'winner_prematch_stats', NULL, 'loser_prematch_stats', NULL, 'draw_prematch_stats', NULL,
-        'loser_stats', CASE WHEN ppred.l_ticker_pre IS NULL THEN NULL ELSE json_build_object(
+        'loser_stats', CASE WHEN ppred.l_ticker_pre IS NULL OR ppred.l_prob_pre IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', ppred.l_ticker_pre, 'probability', ppred.l_prob_pre,
             'volume', NULL, 'dollar_volume', NULL, 'open_interest', NULL, 'open_interest_dollar', NULL
         ) END,
-        'draw_stats', CASE WHEN ppred.d_ticker IS NULL THEN NULL ELSE json_build_object(
+        'draw_stats', CASE WHEN ppred.d_ticker IS NULL OR ppred.d_prob_pre IS NULL THEN NULL ELSE json_build_object(
             'market_ticker', ppred.d_ticker, 'probability', ppred.d_prob_pre,
             'volume', NULL, 'dollar_volume', NULL, 'open_interest', NULL, 'open_interest_dollar', NULL
         ) END,
         'time_saved_utc', ppred.time_saved,
+        'total_volume', NULLIF(ppred.total_vol_pre, 0),
         'is_correct', CASE
             WHEN m.isplayed != true THEN NULL
             WHEN COALESCE(ppred.d_prob_pre,0) > COALESCE(ppred.w_prob_pre,0) AND m.isdraw = true THEN true
@@ -311,6 +322,7 @@ _BASE_JOINS = f"""
     JOIN teams awt ON awt.team_id = m.away_id
     LEFT JOIN countries atc ON atc.country_id = awt.country_id
     LEFT JOIN countries lc ON lc.country_id = l.country_id
+    LEFT JOIN stadiums s ON s.id = m.stadium_id
     LEFT JOIN LATERAL (
         SELECT
             MAX(ranked_k.event_ticker)                                                                    AS event_ticker,
@@ -342,7 +354,27 @@ _BASE_JOINS = f"""
             MAX(CASE WHEN NOT ranked_k.is_tie AND ranked_k.rn_pre=2 THEN ranked_k.pre_prob END)           AS l_prob_pre,
             MAX(CASE WHEN ranked_k.is_tie THEN ranked_k.pre_prob END)                                      AS d_prob_pre,
             to_char(to_timestamp(AVG(EXTRACT(EPOCH FROM ranked_k.updated_time))) AT TIME ZONE 'UTC',
-                    'YYYY-MM-DD HH24:MI:SS') || '+00'                                                      AS time_saved
+                    'YYYY-MM-DD HH24:MI:SS') || '+00'                                                      AS time_saved,
+            (SELECT COALESCE(SUM(kv.dvol), 0)
+             FROM (
+                 SELECT DISTINCT ON (kms.market_ticker) kms.dollar_volume AS dvol
+                 FROM kalshi_market_snapshots kms
+                 JOIN kalshi_markets km2 ON km2.ticker = kms.market_ticker
+                 JOIN kalshi_events ke2 ON ke2.event_ticker = km2.event_ticker
+                 WHERE ke2.match_id = m.match_id
+                   AND kms.snapshotted_at <= COALESCE(m.match_end_time_utc, m.match_time_utc + INTERVAL '3 hours')
+                 ORDER BY kms.market_ticker, kms.snapshotted_at DESC
+             ) kv) AS total_dvol_lat,
+            (SELECT COALESCE(SUM(kv.dvol), 0)
+             FROM (
+                 SELECT DISTINCT ON (kms.market_ticker) kms.dollar_volume AS dvol
+                 FROM kalshi_market_snapshots kms
+                 JOIN kalshi_markets km2 ON km2.ticker = kms.market_ticker
+                 JOIN kalshi_events ke2 ON ke2.event_ticker = km2.event_ticker
+                 WHERE ke2.match_id = m.match_id
+                   AND kms.snapshotted_at <= m.match_time_utc
+                 ORDER BY kms.market_ticker, kms.snapshotted_at DESC
+             ) kv) AS total_dvol_pre
         FROM (
             SELECT *,
                    ROW_NUMBER() OVER (PARTITION BY is_tie ORDER BY latest_prob DESC NULLS LAST) AS rn_lat,
@@ -377,12 +409,23 @@ _BASE_JOINS = f"""
                        COALESCE(
                            NULLIF((km.yes_bid_dollars + km.yes_ask_dollars) / 2.0, 0),
                            (SELECT kfh.raw_numerical_forecast FROM kalshi_forecast_history kfh
-                            WHERE kfh.market_ticker = km.ticker ORDER BY kfh.end_period_ts DESC LIMIT 1)
+                            WHERE kfh.market_ticker = km.ticker ORDER BY kfh.end_period_ts DESC LIMIT 1),
+                           (SELECT NULLIF((kms.yes_bid_dollars + kms.yes_ask_dollars) / 2.0, 0)
+                            FROM kalshi_market_snapshots kms
+                            WHERE kms.market_ticker = km.ticker
+                            ORDER BY kms.snapshotted_at DESC LIMIT 1)
                        ) AS latest_prob,
-                       (SELECT kfh.raw_numerical_forecast FROM kalshi_forecast_history kfh
-                        WHERE kfh.market_ticker = km.ticker
-                          AND kfh.end_period_ts <= m.match_time_utc
-                        ORDER BY kfh.end_period_ts DESC LIMIT 1) AS pre_prob
+                       COALESCE(
+                           (SELECT kfh.raw_numerical_forecast FROM kalshi_forecast_history kfh
+                            WHERE kfh.market_ticker = km.ticker
+                              AND kfh.end_period_ts <= m.match_time_utc
+                            ORDER BY kfh.end_period_ts DESC LIMIT 1),
+                           (SELECT NULLIF((kms.yes_bid_dollars + kms.yes_ask_dollars) / 2.0, 0)
+                            FROM kalshi_market_snapshots kms
+                            WHERE kms.market_ticker = km.ticker
+                              AND kms.snapshotted_at <= m.match_time_utc
+                            ORDER BY kms.snapshotted_at DESC LIMIT 1)
+                       ) AS pre_prob
                 FROM kalshi_events ke
                 JOIN kalshi_markets km ON km.event_ticker = ke.event_ticker
                 WHERE ke.match_id = m.match_id
@@ -414,7 +457,27 @@ _BASE_JOINS = f"""
             MAX(CASE WHEN NOT ranked_p.is_draw_mkt AND ranked_p.rn_pre=2 THEN ranked_p.pre_prob END)        AS l_prob_pre,
             MAX(CASE WHEN ranked_p.is_draw_mkt THEN ranked_p.pre_prob END)                                   AS d_prob_pre,
             to_char(to_timestamp(AVG(EXTRACT(EPOCH FROM ranked_p.updated_at))) AT TIME ZONE 'UTC',
-                    'YYYY-MM-DD HH24:MI:SS') || '+00'                                                        AS time_saved
+                    'YYYY-MM-DD HH24:MI:SS') || '+00'                                                        AS time_saved,
+            (SELECT COALESCE(SUM(pv.vol), 0)
+             FROM (
+                 SELECT DISTINCT ON (pms.market_id) pms.volume AS vol
+                 FROM polymarket_market_snapshots pms
+                 JOIN polymarket_markets pm2 ON pm2.id = pms.market_id
+                 JOIN polymarket_events pe2 ON pe2.id = pm2.event_id
+                 WHERE pe2.match_id = m.match_id
+                   AND pms.snapshotted_at <= COALESCE(m.match_end_time_utc, m.match_time_utc + INTERVAL '3 hours')
+                 ORDER BY pms.market_id, pms.snapshotted_at DESC
+             ) pv) AS total_vol_lat,
+            (SELECT COALESCE(SUM(pv.vol), 0)
+             FROM (
+                 SELECT DISTINCT ON (pms.market_id) pms.volume AS vol
+                 FROM polymarket_market_snapshots pms
+                 JOIN polymarket_markets pm2 ON pm2.id = pms.market_id
+                 JOIN polymarket_events pe2 ON pe2.id = pm2.event_id
+                 WHERE pe2.match_id = m.match_id
+                   AND pms.snapshotted_at <= m.match_time_utc
+                 ORDER BY pms.market_id, pms.snapshotted_at DESC
+             ) pv) AS total_vol_pre
         FROM (
             SELECT *,
                    ROW_NUMBER() OVER (PARTITION BY is_draw_mkt ORDER BY latest_prob DESC NULLS LAST) AS rn_lat,
@@ -464,13 +527,24 @@ _BASE_JOINS = f"""
                            (SELECT pph.probability FROM polymarket_price_history pph
                             JOIN polymarket_tokens pt ON pt.token_id = pph.token_id
                             WHERE pt.market_id = pm.id::text AND pt.outcome ILIKE 'yes'
-                            ORDER BY pph.ts DESC LIMIT 1)
+                            ORDER BY pph.ts DESC LIMIT 1),
+                           (SELECT NULLIF(pms.outcome_prices[1]::float, 0)
+                            FROM polymarket_market_snapshots pms
+                            WHERE pms.market_id = pm.id
+                            ORDER BY pms.snapshotted_at DESC LIMIT 1)
                        ) AS latest_prob,
-                       (SELECT pph.probability FROM polymarket_price_history pph
-                        JOIN polymarket_tokens pt ON pt.token_id = pph.token_id
-                        WHERE pt.market_id = pm.id::text AND pt.outcome ILIKE 'yes'
-                          AND to_timestamp(pph.ts) < m.match_time_utc
-                        ORDER BY pph.ts DESC LIMIT 1) AS pre_prob
+                       COALESCE(
+                           (SELECT pph.probability FROM polymarket_price_history pph
+                            JOIN polymarket_tokens pt ON pt.token_id = pph.token_id
+                            WHERE pt.market_id = pm.id::text AND pt.outcome ILIKE 'yes'
+                              AND to_timestamp(pph.ts) < m.match_time_utc
+                            ORDER BY pph.ts DESC LIMIT 1),
+                           (SELECT NULLIF(pms.outcome_prices[1]::float, 0)
+                            FROM polymarket_market_snapshots pms
+                            WHERE pms.market_id = pm.id
+                              AND pms.snapshotted_at < m.match_time_utc
+                            ORDER BY pms.snapshotted_at DESC LIMIT 1)
+                       ) AS pre_prob
                 FROM polymarket_events pe
                 JOIN polymarket_markets pm ON pm.event_id = pe.id
                 WHERE pe.match_id = m.match_id
@@ -479,6 +553,53 @@ _BASE_JOINS = f"""
             ) raw_p
         ) ranked_p
     ) ppred ON true"""
+
+# Prediction-free variants for h2h / last-5 base CTEs.
+# The kpred + ppred LATERALs are expensive (correlated subqueries into forecast
+# history tables per market per match).  Historical matches don't need live
+# prediction data, so we strip those two blocks entirely.
+_i = _BASE_COLS.index('\n    -- kalshi latest prediction')
+_BASE_COLS_NOPRED = _BASE_COLS[:_i] + """
+    NULL::json AS kalshi_pred_json,
+    NULL::json AS kalshi_prematch_pred_json,
+    NULL::json AS polym_pred_json,
+    NULL::json AS polym_prematch_pred_json"""
+
+_j = _BASE_JOINS.index('\n    LEFT JOIN LATERAL')
+_BASE_JOINS_NOPRED = _BASE_JOINS[:_j]
+
+# Bydate variant: replace per-row color correlated subqueries with pre-materialized CTE joins.
+# The CTEs (team_recent_home_colors / team_recent_away_colors) are injected by the bydate route.
+_i_color_start = _BASE_COLS.index('\n    COALESCE(\n        m.home_color,')
+_i_color_end   = _BASE_COLS.index('\n    ) AS away_color,') + len('\n    ) AS away_color,')
+_BASE_COLS_BYDATE = (
+    _BASE_COLS[:_i_color_start]
+    + '\n    COALESCE(m.home_color, thc.home_color) AS home_color,'
+    + '\n    COALESCE(m.away_color, tac.away_color) AS away_color,'
+    + _BASE_COLS[_i_color_end:]
+).replace(
+    '\n    m.stadium_id,',
+    '\n    COALESCE(m.stadium_id, fallback_stadia.sid) AS stadium_id,'
+)
+_BASE_JOINS_BYDATE = (
+    _BASE_JOINS.replace(
+        '\n    LEFT JOIN stadiums s ON s.id = m.stadium_id',
+        """
+    LEFT JOIN LATERAL (
+        SELECT m2.stadium_id AS sid
+        FROM matches m2
+        WHERE m2.home_id = m.home_id
+          AND m2.stadium_id IS NOT NULL
+          AND m2.match_date < m.match_date
+        ORDER BY m2.match_date DESC
+        LIMIT 1
+    ) fallback_stadia ON m.stadium_id IS NULL
+    LEFT JOIN stadiums s ON s.id = COALESCE(m.stadium_id, fallback_stadia.sid)"""
+    )
+    + """
+    LEFT JOIN team_recent_home_colors thc ON thc.team_id = m.home_id
+    LEFT JOIN team_recent_away_colors tac ON tac.team_id = m.away_id"""
+)
 
 _COMP_OBJ_EXPR = """json_build_object(
     'league', json_build_object(
@@ -532,7 +653,8 @@ _MATCH_OBJ = """json_build_object(
         'corners',       home_corners,
         'xg',            home_xg::float,
         'pass_att',      home_pass_att,
-        'pass_succ',     home_pass_succ
+        'pass_succ',     home_pass_succ,
+        'league_rank',   home_ranking
     ),
     'home_color',      home_color,
     'away_team', json_build_object(
@@ -553,7 +675,8 @@ _MATCH_OBJ = """json_build_object(
         'corners',       away_corners,
         'xg',            away_xg::float,
         'pass_att',      away_pass_att,
-        'pass_succ',     away_pass_succ
+        'pass_succ',     away_pass_succ,
+        'league_rank',   away_ranking
     ),
     'away_color',      away_color,
     'win_team_id',     win_team_id,
@@ -564,6 +687,16 @@ _MATCH_OBJ = """json_build_object(
     'isplayed',        isplayed,
     'round',           round,
     'gameweek_number', gameweek_number,
+    'stadium', CASE WHEN stadium_id IS NULL THEN NULL ELSE json_build_object(
+        'stadium_id',   stadium_id,
+        'stadium_name', stadium_name,
+        'attendance',   attendance,
+        'capacity',     s_capacity,
+        'capacity_pct', CASE WHEN s_capacity > 0 AND attendance IS NOT NULL
+                             THEN ROUND((attendance::numeric / s_capacity * 100), 1)::float
+                             ELSE NULL END,
+        'address', stadium_address
+    ) END,
     'kalshi_prediction',              kalshi_pred_json,
     'kalshi_prematch_prediction',     kalshi_prematch_pred_json,
     'polymarket_prediction',          polym_pred_json,
@@ -590,6 +723,7 @@ _AGG_FROM = """FROM comp_data cd
 
 # ─── bydate route ────────────────────────────────────────────────────────────
 
+#@router.get("", response_model=MatchesByDateResponse)
 @router.get("/bydate", response_model=MatchesByDateResponse)
 async def get_matches_bydate(
     session: DBSession,
@@ -602,11 +736,32 @@ async def get_matches_bydate(
     logger.info(f"Fetching matches for date={match_date} league_ids={league_ids}")
 
     query = text(f"""
-        WITH base AS (
-            SELECT {_BASE_COLS}
-            {_BASE_JOINS}
+        WITH
+        -- Pre-compute the most-recent home/away colors per team over the last
+        -- 2 months in a single pass, then JOIN them in base instead of running
+        -- one correlated subquery per match row.
+        team_recent_home_colors AS MATERIALIZED (
+            SELECT DISTINCT ON (home_id) home_id AS team_id, home_color
+            FROM matches
+            WHERE match_date >= CAST(:match_date AS date) - INTERVAL '2 months'
+              AND match_date <= :match_date
+              AND home_color IS NOT NULL
+            ORDER BY home_id, match_date DESC
+        ),
+        team_recent_away_colors AS MATERIALIZED (
+            SELECT DISTINCT ON (away_id) away_id AS team_id, away_color
+            FROM matches
+            WHERE match_date >= CAST(:match_date AS date) - INTERVAL '2 months'
+              AND match_date <= :match_date
+              AND away_color IS NOT NULL
+            ORDER BY away_id, match_date DESC
+        ),
+        base AS (
+            SELECT {_BASE_COLS_BYDATE}
+            {_BASE_JOINS_BYDATE}
             WHERE m.match_date = :match_date
             AND comp.league_id = ANY(:league_ids)
+            AND m.isplayed IS NOT NULL
         ),
         {_COMP_DATA_CTE},
         {_MATCH_OBJS_CTE}
@@ -633,7 +788,10 @@ async def get_match_data(
         -- ── flags ──────────────────────────────────────────────────────────
         match_flags AS (
             SELECT m.home_id, m.away_id, m.match_date, m.round, m.comp_id,
-                   (ht.type = 'national' AND awt.type = 'national') AS is_intl
+                   (ht.type = 'national' AND awt.type = 'national') AS is_intl,
+                   CASE WHEN regexp_replace(m.round, '\D', '', 'g') ~ '^\d+$'
+                        THEN regexp_replace(m.round, '\D', '', 'g')::int
+                        ELSE NULL END AS round_num
             FROM matches m
             JOIN teams ht  ON ht.team_id  = m.home_id
             JOIN teams awt ON awt.team_id = m.away_id
@@ -734,6 +892,8 @@ async def get_match_data(
                                 'iso_code_3', c2.iso_code_3) END
                         )
                     ),
+                    'match_id',      :match_id,
+                    'player_id',     pb.player_id,
                     'team_id',       pb.team_id,
                     'position',      pb.position,
                     'number',        pb.number,
@@ -863,17 +1023,24 @@ async def get_match_data(
 
         -- ── h2h (last 5 between the two teams) ──────────────────────────────
         h2h_recent AS (
-            SELECT m.match_id
-            FROM matches m, match_flags mf
-            WHERE ((m.home_id = mf.home_id AND m.away_id = mf.away_id)
-                OR (m.home_id = mf.away_id AND m.away_id = mf.home_id))
-            AND m.isplayed = true AND m.match_id != :match_id
-            AND m.match_date < mf.match_date
-            ORDER BY m.match_date DESC LIMIT 6
+            SELECT match_id FROM (
+                SELECT m.match_id, m.match_date
+                FROM matches m, match_flags mf
+                WHERE m.home_id = mf.home_id AND m.away_id = mf.away_id
+                  AND m.isplayed = true AND m.match_id != :match_id
+                  AND m.match_date < mf.match_date
+                UNION ALL
+                SELECT m.match_id, m.match_date
+                FROM matches m, match_flags mf
+                WHERE m.home_id = mf.away_id AND m.away_id = mf.home_id
+                  AND m.isplayed = true AND m.match_id != :match_id
+                  AND m.match_date < mf.match_date
+            ) t
+            ORDER BY match_date DESC LIMIT 6
         ),
         h2h_base AS (
-            SELECT {_BASE_COLS}
-            {_BASE_JOINS}
+            SELECT {_BASE_COLS_NOPRED}
+            {_BASE_JOINS_NOPRED}
             WHERE m.match_id IN (SELECT match_id FROM h2h_recent)
         ),
         h2h_comp_data AS (
@@ -896,16 +1063,22 @@ async def get_match_data(
 
         -- ── home last 5 ──────────────────────────────────────────────────────
         home_last5_recent AS (
-            SELECT m.match_id
-            FROM matches m, match_flags mf
-            WHERE (m.home_id = mf.home_id OR m.away_id = mf.home_id)
-            AND m.isplayed = true AND m.match_id != :match_id
-            AND m.match_date < mf.match_date
-            ORDER BY m.match_date DESC LIMIT 12
+            SELECT match_id FROM (
+                SELECT m.match_id, m.match_date
+                FROM matches m, match_flags mf
+                WHERE m.home_id = mf.home_id AND m.isplayed = true
+                  AND m.match_id != :match_id AND m.match_date < mf.match_date
+                UNION ALL
+                SELECT m.match_id, m.match_date
+                FROM matches m, match_flags mf
+                WHERE m.away_id = mf.home_id AND m.isplayed = true
+                  AND m.match_id != :match_id AND m.match_date < mf.match_date
+            ) t
+            ORDER BY match_date DESC LIMIT 12
         ),
         home_last5_base AS (
-            SELECT {_BASE_COLS}
-            {_BASE_JOINS}
+            SELECT {_BASE_COLS_NOPRED}
+            {_BASE_JOINS_NOPRED}
             WHERE m.match_id IN (SELECT match_id FROM home_last5_recent)
         ),
         home_last5_comp_data AS (
@@ -928,16 +1101,22 @@ async def get_match_data(
 
         -- ── away last 5 ──────────────────────────────────────────────────────
         away_last5_recent AS (
-            SELECT m.match_id
-            FROM matches m, match_flags mf
-            WHERE (m.home_id = mf.away_id OR m.away_id = mf.away_id)
-            AND m.isplayed = true AND m.match_id != :match_id
-            AND m.match_date < mf.match_date
-            ORDER BY m.match_date DESC LIMIT 15
+            SELECT match_id FROM (
+                SELECT m.match_id, m.match_date
+                FROM matches m, match_flags mf
+                WHERE m.home_id = mf.away_id AND m.isplayed = true
+                  AND m.match_id != :match_id AND m.match_date < mf.match_date
+                UNION ALL
+                SELECT m.match_id, m.match_date
+                FROM matches m, match_flags mf
+                WHERE m.away_id = mf.away_id AND m.isplayed = true
+                  AND m.match_id != :match_id AND m.match_date < mf.match_date
+            ) t
+            ORDER BY match_date DESC LIMIT 15
         ),
         away_last5_base AS (
-            SELECT {_BASE_COLS}
-            {_BASE_JOINS}
+            SELECT {_BASE_COLS_NOPRED}
+            {_BASE_JOINS_NOPRED}
             WHERE m.match_id IN (SELECT match_id FROM away_last5_recent)
         ),
         away_last5_comp_data AS (
@@ -966,25 +1145,31 @@ async def get_match_data(
               AND comp.stage = 'league'
               AND comp.stage_order = 1
         ),
-        -- All played matches in this competition up to and including the current round
+        -- All played matches in this competition up to and including the current round.
+        -- mf.round_num IS NOT NULL short-circuits the entire scan for non-league/non-numeric rounds.
+        -- The inner subquery computes regexp_replace once per row to avoid calling it 3× per row.
         comp_matches_eod AS (
-            SELECT m.home_id, m.away_id, m.home_goals, m.away_goals
-            FROM matches m, match_flags mf
-            WHERE m.comp_id = mf.comp_id AND m.isplayed = true
-              AND regexp_replace(m.round,   '\D', '', 'g') ~ '^\d+$'
-              AND regexp_replace(mf.round,  '\D', '', 'g') ~ '^\d+$'
-              AND regexp_replace(m.round,   '\D', '', 'g')::int
-                  <= regexp_replace(mf.round, '\D', '', 'g')::int
+            SELECT r.home_id, r.away_id, r.home_goals, r.away_goals
+            FROM (
+                SELECT m.home_id, m.away_id, m.home_goals, m.away_goals,
+                       regexp_replace(m.round, '\D', '', 'g') AS rn
+                FROM matches m, match_flags mf
+                WHERE m.comp_id = mf.comp_id AND m.isplayed = true
+                  AND mf.round_num IS NOT NULL
+            ) r, match_flags mf
+            WHERE r.rn ~ '^\d+$' AND r.rn::int <= mf.round_num
         ),
         -- All played matches strictly before the current round
         comp_matches_prev AS (
-            SELECT m.home_id, m.away_id, m.home_goals, m.away_goals
-            FROM matches m, match_flags mf
-            WHERE m.comp_id = mf.comp_id AND m.isplayed = true
-              AND regexp_replace(m.round,   '\D', '', 'g') ~ '^\d+$'
-              AND regexp_replace(mf.round,  '\D', '', 'g') ~ '^\d+$'
-              AND regexp_replace(m.round,   '\D', '', 'g')::int
-                  < regexp_replace(mf.round, '\D', '', 'g')::int
+            SELECT r.home_id, r.away_id, r.home_goals, r.away_goals
+            FROM (
+                SELECT m.home_id, m.away_id, m.home_goals, m.away_goals,
+                       regexp_replace(m.round, '\D', '', 'g') AS rn
+                FROM matches m, match_flags mf
+                WHERE m.comp_id = mf.comp_id AND m.isplayed = true
+                  AND mf.round_num IS NOT NULL
+            ) r, match_flags mf
+            WHERE r.rn ~ '^\d+$' AND r.rn::int < mf.round_num
         ),
         -- Per-team result from matches played in the current round
         current_round_team_results AS (
@@ -1118,7 +1303,7 @@ async def get_match_data(
                     )
                     ELSE NULL
                 END AS rankings
-        )
+        ),
 
         -- ── possession sequence ──────────────────────────────────────────────
         possesion_seq_agg AS (
@@ -1129,18 +1314,18 @@ async def get_match_data(
                     'goals', ms.home_goals, 'penalty_goals', NULL,
                     'shots', NULL, 'possesion', ms.home_poss::int,
                     'offsides', NULL, 'corners', NULL, 'xg', NULL,
-                    'pass_att', NULL, 'pass_succ', NULL
+                    'pass_att', NULL, 'pass_succ', NULL, 'league_rank', NULL
                 ),
                 'away_stats', json_build_object(
                     'goals', ms.away_goals, 'penalty_goals', NULL,
                     'shots', NULL, 'possesion', ms.away_poss::int,
                     'offsides', NULL, 'corners', NULL, 'xg', NULL,
-                    'pass_att', NULL, 'pass_succ', NULL
+                    'pass_att', NULL, 'pass_succ', NULL, 'league_rank', NULL
                 )
             ) ORDER BY ms.minute, ms.add_minute), NULL) AS seq
             FROM match_snapshots ms
             WHERE ms.match_id = :match_id
-        ),
+        )
 
         -- ── final assembly ───────────────────────────────────────────────────
         SELECT json_build_object(
@@ -1197,7 +1382,8 @@ async def get_match_data(
                             'corners',       m.home_corners,
                             'xg',            m.home_xg::float,
                             'pass_att',      m.home_pass_att,
-                            'pass_succ',     m.home_pass_succ
+                            'pass_succ',     m.home_pass_succ,
+                            'league_rank',   m.home_ranking
                         ),
                         'manager', CASE WHEN hm.id IS NULL THEN NULL ELSE json_build_object(
                             'manager_id', hm.id, 'name', hm.name,
@@ -1229,7 +1415,8 @@ async def get_match_data(
                             'corners',       m.away_corners,
                             'xg',            m.away_xg::float,
                             'pass_att',      m.away_pass_att,
-                            'pass_succ',     m.away_pass_succ
+                            'pass_succ',     m.away_pass_succ,
+                            'league_rank',   m.away_ranking
                         ),
                         'manager', CASE WHEN am.id IS NULL THEN NULL ELSE json_build_object(
                             'manager_id', am.id, 'name', am.name,
@@ -1448,6 +1635,28 @@ async def get_polym_markets(
                 to_char(to_timestamp(AVG(EXTRACT(EPOCH FROM updated_at))) AT TIME ZONE 'UTC',
                         'YYYY-MM-DD HH24:MI:SS') || '+00'                         AS time_saved_utc
             FROM ranked_latest
+        ),
+        -- Snapshot-based total volume across all event markets
+        p_total_vol_end AS (
+            SELECT NULLIF(COALESCE(SUM(pv.vol), 0), 0) AS val
+            FROM (
+                SELECT DISTINCT ON (pms.market_id) pms.volume AS vol
+                FROM polymarket_market_snapshots pms
+                JOIN all_markets am ON am.id = pms.market_id
+                WHERE pms.snapshotted_at <= (SELECT COALESCE(match_end_time_utc, match_time_utc + INTERVAL '3 hours')
+                                              FROM match_info)
+                ORDER BY pms.market_id, pms.snapshotted_at DESC
+            ) pv
+        ),
+        p_total_vol_start AS (
+            SELECT NULLIF(COALESCE(SUM(pv.vol), 0), 0) AS val
+            FROM (
+                SELECT DISTINCT ON (pms.market_id) pms.volume AS vol
+                FROM polymarket_market_snapshots pms
+                JOIN all_markets am ON am.id = pms.market_id
+                WHERE pms.snapshotted_at <= (SELECT match_start_ts FROM match_info)
+                ORDER BY pms.market_id, pms.snapshotted_at DESC
+            ) pv
         )
 
         SELECT json_build_object(
@@ -1492,6 +1701,7 @@ async def get_polym_markets(
                             'open_interest', draw_oi, 'open_interest_dollar', NULL
                         ) END,
                         'time_saved_utc', time_saved_utc,
+                        'total_volume', (SELECT val FROM p_total_vol_end),
                         'is_correct', CASE
                             WHEN (SELECT win_team FROM match_info) IS NULL AND (SELECT isdraw FROM match_info) IS NULL THEN NULL
                             WHEN COALESCE(draw_prob, 0) > COALESCE(winner_prob, 0) AND (SELECT isdraw FROM match_info) = true THEN true
@@ -1699,6 +1909,28 @@ async def get_kalshi_markets(
                 to_char(to_timestamp(AVG(EXTRACT(EPOCH FROM updated_time))) AT TIME ZONE 'UTC',
                         'YYYY-MM-DD HH24:MI:SS') || '+00'                    AS time_saved_utc
             FROM ranked_prematch
+        ),
+        -- Snapshot-based total dollar volume across all event markets
+        k_total_vol_end AS (
+            SELECT NULLIF(COALESCE(SUM(kv.dvol), 0), 0) AS val
+            FROM (
+                SELECT DISTINCT ON (kms.market_ticker) kms.dollar_volume AS dvol
+                FROM kalshi_market_snapshots kms
+                JOIN all_markets am ON am.ticker = kms.market_ticker
+                WHERE kms.snapshotted_at <= (SELECT COALESCE(match_end_time_utc, match_time_utc + INTERVAL '3 hours')
+                                              FROM matches WHERE match_id = :match_id)
+                ORDER BY kms.market_ticker, kms.snapshotted_at DESC
+            ) kv
+        ),
+        k_total_vol_start AS (
+            SELECT NULLIF(COALESCE(SUM(kv.dvol), 0), 0) AS val
+            FROM (
+                SELECT DISTINCT ON (kms.market_ticker) kms.dollar_volume AS dvol
+                FROM kalshi_market_snapshots kms
+                JOIN all_markets am ON am.ticker = kms.market_ticker
+                WHERE kms.snapshotted_at <= (SELECT match_time_utc FROM matches WHERE match_id = :match_id)
+                ORDER BY kms.market_ticker, kms.snapshotted_at DESC
+            ) kv
         )
 
         SELECT json_build_object(
@@ -1731,6 +1963,7 @@ async def get_kalshi_markets(
                         ) END,
                         'draw_prematch_stats', NULL,
                         'time_saved_utc', time_saved_utc,
+                        'total_volume', (SELECT val FROM k_total_vol_start),
                         'is_correct', CASE
                             WHEN (SELECT win_team FROM match_info) IS NULL AND (SELECT isdraw FROM match_info) IS NULL THEN NULL
                             WHEN COALESCE(draw_prob, 0) > COALESCE(winner_prob, 0) AND (SELECT isdraw FROM match_info) = true THEN true
@@ -1777,6 +2010,7 @@ async def get_kalshi_markets(
                             'open_interest', draw_oi, 'open_interest_dollar', draw_oi_dollar
                         ) END,
                         'time_saved_utc', time_saved_utc,
+                        'total_volume', (SELECT val FROM k_total_vol_end),
                         'is_correct', CASE
                             WHEN (SELECT win_team FROM match_info) IS NULL AND (SELECT isdraw FROM match_info) IS NULL THEN NULL
                             WHEN COALESCE(draw_prob, 0) > COALESCE(winner_prob, 0) AND (SELECT isdraw FROM match_info) = true THEN true

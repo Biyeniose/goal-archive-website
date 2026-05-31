@@ -1,7 +1,7 @@
 from typing import List, Optional
 from pydantic import BaseModel
 
-from .utils import Country, Player
+from .utils import Country, Manager, Player
 from .team import Team, Transfer
 
 
@@ -49,15 +49,21 @@ class LeagueStandingsResponse(BaseModel):
 
 
 class PlayerCompetitionStats(BaseModel):
+    #competition: Competition
+    #start_date: Optional[str]
+    team: Optional[Team] = None
     gp: Optional[int] = None
     minutes: Optional[int] = None
     mpg: Optional[float] = None
     goals: Optional[int] = None
     goals_p90: Optional[float] = None
+    xg: Optional[float] = None
     assists: Optional[int] = None
     assists_p90: Optional[float] = None
+    xg_assist: Optional[float] = None
     goals_assists: Optional[int] = None
     goals_assists_p90: Optional[float] = None
+    xga: Optional[float] = None
     shots: Optional[int] = None
     clean_sheets: Optional[int] = None
     goals_conceded: Optional[int] = None
@@ -66,7 +72,7 @@ class PlayerCompetitionStats(BaseModel):
     pens_att: Optional[int] = None
     cards_yellow: Optional[int] = None
     cards_red: Optional[int] = None
-    competition: Optional[Competition] = None
+    
 
 
 class LeaguePlayerStats(BaseModel):
@@ -137,4 +143,5 @@ class LongestDroughts(BaseModel):
 
 class LongestDroughtsReponse(BaseModel):
     data: List[LongestDroughts]
+
 

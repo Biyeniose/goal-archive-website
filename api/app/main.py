@@ -8,7 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
 from .dependencies import db_manager, app_logger, get_logger
-from .routers import players, teams, leagues, matches
+from .routers import players, teams, leagues, matches, profiles
 
 LoggerDep = Annotated[logging.Logger, Depends(get_logger)]
 
@@ -79,6 +79,7 @@ app.include_router(players.router)
 app.include_router(teams.router)
 app.include_router(leagues.router)
 app.include_router(matches.router)
+app.include_router(profiles.router)
 
 
 @app.get("/")

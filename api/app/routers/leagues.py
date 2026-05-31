@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query, HTTPException
 
 from ..dependencies import DBSession, AppLoggerDep
 from ..models.league import LeagueListResponse, LeagueStandingsResponse, LeagueStatsResponse, LeagueStatsbyDateResponse, LeagueStatsByDateData, BestLoaneesResponse, LongestDroughtsReponse
+from ..models.match import CompetitionSquadsResponse
 from ..constants import STAT_COLUMNS, BYDATE_STAT_COLUMNS, DEFAULT_LEAGUE_IDS, POSITION_GROUPS
 
 router = APIRouter(
@@ -1164,4 +1165,254 @@ async def get_longest_droughts(
     return result[0] if result else {"data": []}
 
 
+# get international competition squads
+@router.get("/{league_id}/squads/{season_year}/{country_id}", response_model=CompetitionSquadsResponse)
+async def get_competition_squads(
+    league_id: int,
+    season_year: int,
+    country_id: int,
+    session: DBSession,
+    logger: AppLoggerDep,
+):
+    logger.info(f"Fetching squads league_id={league_id}, season_year={season_year}, country_id={country_id}")
 
+    query = text("""
+        WITH
+        -- Competition for this league/season (exclude qualification)
+        comp AS (
+            SELECT c.competition_id, c.name, c.season_year, c.stage, c.logo_url,
+                   l.league_id, l.name AS league_name, l.tier_level, l.format,
+                   l.competition_level, l.scope,
+                   (SELECT c2.logo_url FROM competitions c2
+                    WHERE c2.league_id = l.league_id
+                    ORDER BY c2.season_year DESC LIMIT 1) AS league_logo,
+                   lc.country_id AS lc_id, lc.name AS lc_name,
+                   lc.flag_url AS lc_flag, lc.continent AS lc_cont, lc.iso_code_3 AS lc_iso
+            FROM competitions c
+            JOIN leagues l ON l.league_id = c.league_id
+            LEFT JOIN countries lc ON lc.country_id = l.country_id
+            WHERE l.league_id = :league_id
+              AND c.season_year = :season_year
+              AND LOWER(COALESCE(c.stage, '')) NOT IN ('qualification', 'qualifiers')
+            LIMIT 1
+        ),
+
+        -- National team for this country
+        nat_team AS (
+            SELECT t.team_id, t.name, t.common_name, t.short_name,
+                   t.logo_url, t.level, t.type,
+                   tc.country_id AS tc_id, tc.name AS tc_name,
+                   tc.flag_url AS tc_flag, tc.continent AS tc_cont, tc.iso_code_3 AS tc_iso
+            FROM teams t
+            LEFT JOIN countries tc ON tc.country_id = t.country_id
+            WHERE t.type = 'national'
+              AND t.country_id = :country_id
+            LIMIT 1
+        ),
+
+        -- Prefer 'final' squad type; fall back to 'preliminary'
+        squad_type AS (
+            SELECT CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM squads sq
+                    WHERE sq.team_id = (SELECT team_id FROM nat_team)
+                      AND sq.season_year = :season_year
+                      AND sq.type = 'final'
+                ) THEN 'final'
+                ELSE 'preliminary'
+            END AS type_to_use
+        ),
+
+        -- Squad rows for this team/season/type
+        squad_rows AS (
+            SELECT sq.player_id, sq.number, sq.club_team_id,
+                   sq.date_announced, sq.type, sq.manager_id
+            FROM squads sq
+            WHERE sq.team_id = (SELECT team_id FROM nat_team)
+              AND sq.season_year = :season_year
+              AND sq.type = (SELECT type_to_use FROM squad_type)
+        ),
+
+        -- Most common manager_id in the squad
+        manager_pick AS (
+            SELECT manager_id
+            FROM squad_rows
+            WHERE manager_id IS NOT NULL
+            GROUP BY manager_id
+            ORDER BY COUNT(*) DESC
+            LIMIT 1
+        ),
+
+        -- Players JSON
+        players_agg AS (
+            SELECT COALESCE(json_agg(json_build_object(
+                'player', json_build_object(
+                    'player_id',       p.player_id,
+                    'player_name',     p.player_name,
+                    'age',             CASE WHEN p.dob IS NOT NULL
+                                           THEN :season_year - EXTRACT(YEAR FROM p.dob)::int
+                                           ELSE NULL END,
+                    'tfm_pic_url',     p.tfm_pic_url,
+                    'pic_url',         p.pic_url,
+                    'pixel_pic_url',   p.pixel_pic_url,
+                    'position',        p.position,
+                    'other_positions', COALESCE(p.other_positions, ARRAY[]::text[]),
+                    'countries', json_build_object(
+                        'country1', CASE WHEN c1.country_id IS NULL THEN NULL ELSE json_build_object(
+                            'country_id', c1.country_id, 'name', c1.name,
+                            'flag_url', c1.flag_url, 'continent', c1.continent,
+                            'iso_code_3', c1.iso_code_3) END,
+                        'country2', CASE WHEN c2.country_id IS NULL THEN NULL ELSE json_build_object(
+                            'country_id', c2.country_id, 'name', c2.name,
+                            'flag_url', c2.flag_url, 'continent', c2.continent,
+                            'iso_code_3', c2.iso_code_3) END
+                    )
+                ),
+                'number', sr.number,
+                'club_team', CASE WHEN ct.team_id IS NULL THEN NULL ELSE json_build_object(
+                    'team_id',     ct.team_id,
+                    'team_name',   ct.name,
+                    'common_name', ct.common_name,
+                    'short_name',  ct.short_name,
+                    'logo_url',    ct.logo_url,
+                    'level',       ct.level,
+                    'type',        ct.type,
+                    'country', CASE WHEN ctc.country_id IS NULL THEN NULL ELSE json_build_object(
+                        'country_id', ctc.country_id, 'name', ctc.name,
+                        'flag_url', ctc.flag_url, 'continent', ctc.continent,
+                        'iso_code_3', ctc.iso_code_3) END
+                ) END
+            ) ORDER BY sr.number NULLS LAST), '[]'::json) AS players_json
+            FROM squad_rows sr
+            JOIN players p ON p.player_id = sr.player_id
+            LEFT JOIN countries c1  ON c1.country_id  = p.country_id
+            LEFT JOIN countries c2  ON c2.country_id  = p.country2_id
+            LEFT JOIN teams ct      ON ct.team_id      = sr.club_team_id
+            LEFT JOIN countries ctc ON ctc.country_id  = ct.country_id
+        ),
+
+        -- Manager JSON
+        manager_info AS (
+            SELECT CASE WHEN mgr.id IS NULL THEN NULL ELSE json_build_object(
+                'manager_id', mgr.id,
+                'name',       mgr.name,
+                'country', CASE WHEN mc.country_id IS NULL THEN NULL ELSE json_build_object(
+                    'country_id', mc.country_id, 'name', mc.name,
+                    'flag_url', mc.flag_url, 'continent', mc.continent,
+                    'iso_code_3', mc.iso_code_3) END
+            ) END AS manager_json
+            FROM manager_pick mp
+            LEFT JOIN managers mgr ON mgr.id = mp.manager_id
+            LEFT JOIN countries mc ON mc.country_id = mgr.country_id
+        ),
+
+        -- Matches for this team in the competition
+        match_list AS (
+            SELECT COALESCE(json_agg(json_build_object(
+                'match_id',        mm.match_id,
+                'match_date',      mm.match_date::text,
+                'match_time_utc',  mm.match_time_utc::text,
+                'home_team', json_build_object(
+                    'team_id',     ht.team_id,   'team_name',   ht.name,
+                    'common_name', ht.common_name, 'short_name', ht.short_name,
+                    'logo_url',    ht.logo_url,  'level',       ht.level,
+                    'type',        ht.type,
+                    'country', CASE WHEN htc.country_id IS NULL THEN NULL ELSE json_build_object(
+                        'country_id', htc.country_id, 'name', htc.name,
+                        'flag_url', htc.flag_url, 'continent', htc.continent,
+                        'iso_code_3', htc.iso_code_3) END
+                ),
+                'home_stats', json_build_object(
+                    'goals', mm.home_goals, 'penalty_goals', mm.pen_home_goals,
+                    'shots', NULL, 'possesion', NULL, 'offsides', NULL,
+                    'corners', NULL, 'xg', NULL, 'pass_att', NULL,
+                    'pass_succ', mm.home_pass_succ, 'league_rank', NULL
+                ),
+                'away_team', json_build_object(
+                    'team_id',     awt.team_id,   'team_name',   awt.name,
+                    'common_name', awt.common_name, 'short_name', awt.short_name,
+                    'logo_url',    awt.logo_url,  'level',       awt.level,
+                    'type',        awt.type,
+                    'country', CASE WHEN atc.country_id IS NULL THEN NULL ELSE json_build_object(
+                        'country_id', atc.country_id, 'name', atc.name,
+                        'flag_url', atc.flag_url, 'continent', atc.continent,
+                        'iso_code_3', atc.iso_code_3) END
+                ),
+                'away_stats', json_build_object(
+                    'goals', mm.away_goals, 'penalty_goals', NULL,
+                    'shots', NULL, 'possesion', NULL, 'offsides', NULL,
+                    'corners', NULL, 'xg', NULL, 'pass_att', NULL,
+                    'pass_succ', mm.away_pass_succ, 'league_rank', NULL
+                ),
+                'win_team_id',     mm.win_team,
+                'loss_team_id',    mm.loss_team,
+                'isdraw',          mm.isdraw,
+                'pens',            mm.pens,
+                'extra_time',      mm.extra_time,
+                'isplayed',        mm.isplayed,
+                'round',           mm.round,
+                'gameweek_number', mm.gameweek_number,
+                'stadium',         NULL
+            ) ORDER BY mm.match_date), '[]'::json) AS matches_json
+            FROM matches mm
+            JOIN comp c ON c.competition_id = mm.comp_id
+            JOIN nat_team nt ON (mm.home_id = nt.team_id OR mm.away_id = nt.team_id)
+            JOIN teams ht           ON ht.team_id  = mm.home_id
+            LEFT JOIN countries htc ON htc.country_id = ht.country_id
+            JOIN teams awt          ON awt.team_id = mm.away_id
+            LEFT JOIN countries atc ON atc.country_id = awt.country_id
+        )
+
+        SELECT json_build_object(
+            'data', json_build_object(
+                'team', json_build_object(
+                    'team_id',     nt.team_id,
+                    'team_name',   nt.name,
+                    'common_name', nt.common_name,
+                    'short_name',  nt.short_name,
+                    'logo_url',    nt.logo_url,
+                    'level',       nt.level,
+                    'type',        nt.type,
+                    'country', CASE WHEN nt.tc_id IS NULL THEN NULL ELSE json_build_object(
+                        'country_id', nt.tc_id, 'name', nt.tc_name,
+                        'flag_url', nt.tc_flag, 'continent', nt.tc_cont,
+                        'iso_code_3', nt.tc_iso) END
+                ),
+                'competition', json_build_object(
+                    'competition_id', c.competition_id,
+                    'name',           c.name,
+                    'season_year',    c.season_year,
+                    'stage',          c.stage,
+                    'logo_url',       c.logo_url,
+                    'league', json_build_object(
+                        'league_id',        c.league_id,
+                        'league_name',      c.league_name,
+                        'tier_level',       c.tier_level,
+                        'format',           c.format,
+                        'competiton_level', c.competition_level,
+                        'scope',            c.scope,
+                        'logo_url',         c.league_logo,
+                        'country', CASE WHEN c.lc_id IS NULL THEN NULL ELSE json_build_object(
+                            'country_id', c.lc_id, 'name', c.lc_name,
+                            'flag_url', c.lc_flag, 'continent', c.lc_cont,
+                            'iso_code_3', c.lc_iso) END
+                    )
+                ),
+                'matches',        (SELECT matches_json FROM match_list),
+                'players',        (SELECT players_json FROM players_agg),
+                'manager',        (SELECT manager_json FROM manager_info),
+                'date_announced', (SELECT MAX(date_announced::text) FROM squad_rows),
+                'type',           (SELECT type_to_use FROM squad_type)
+            )
+        )
+        FROM nat_team nt, comp c
+    """)
+
+    result = session.exec(query, params={
+        "league_id": league_id,
+        "season_year": season_year,
+        "country_id": country_id,
+    }).first()
+    if not result or result[0].get("data") is None:
+        raise HTTPException(status_code=404, detail="Squad not found")
+    return result[0]
