@@ -1,4 +1,5 @@
 from typing import List, Optional
+
 from pydantic import BaseModel
 
 from .utils import Country
@@ -32,5 +33,3 @@ class Transfer(BaseModel):
     transfer_date: str
     season: Optional[int] = None
     season_str: Optional[str] = None
-
-

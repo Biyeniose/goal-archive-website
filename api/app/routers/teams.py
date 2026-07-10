@@ -1,12 +1,11 @@
-
 from typing import Optional
 
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
-from fastapi import APIRouter, Query, HTTPException
 
-from ..dependencies import DBSession, AppLoggerDep
+from ..dependencies import AppLoggerDep, DBSession
+from ..models.match import NationDistResponse, TeamDataResponse
 from ..models.team import TeamResponse, TeamSearchResponse
-from ..models.match import NationDistResponse
 from ..models.utils import Country
 
 _WC_STAT_COLS = {"goals", "assists", "minutes", "goals_assists"}
@@ -18,7 +17,7 @@ router = APIRouter(
 
 
 @router.get("/search", response_model=TeamSearchResponse)
-async def search_teams(
+def search_teams(
     session: DBSession,
     logger: AppLoggerDep,
     q: str = Query(..., description="Team name search query"),
@@ -37,17 +36,18 @@ async def search_teams(
                 'logo_url',    t.logo_url,
                 'level',       t.level,
                 'type',        t.type,
-                'country', json_build_object(
+                'country', CASE WHEN c.country_id IS NULL THEN NULL ELSE json_build_object(
                     'country_id', c.country_id,
                     'name',       c.name,
                     'flag_url',   c.flag_url,
                     'continent',  c.continent,
                     'iso_code_3', c.iso_code_3
-                )
+                ) END
             ) AS d
             FROM teams t
             LEFT JOIN countries c ON c.country_id = t.country_id
-            WHERE t.name ILIKE :q OR t.common_name ILIKE :q
+            WHERE (t.name ILIKE :q OR t.common_name ILIKE :q)
+              AND t.level IN ('senior')
             ORDER BY t.name
             LIMIT :limit
         ) sub
@@ -58,7 +58,7 @@ async def search_teams(
 
 
 @router.get("/countries", response_model=list[Country])
-async def get_countries(
+def get_countries(
     session: DBSession,
     logger: AppLoggerDep,
 ):
@@ -71,6 +71,7 @@ async def get_countries(
                 'country_id', c.country_id,
                 'name',       c.name,
                 'flag_url',   c.flag_url,
+                'circle_url', c.circle_url,
                 'continent',  c.continent,
                 'iso_code_3', c.iso_code_3
             ) AS d,
@@ -84,7 +85,7 @@ async def get_countries(
 
 
 @router.get("/national-team/{country_id}", response_model=TeamResponse)
-async def get_national_team_by_country(
+def get_national_team_by_country(
     country_id: int,
     session: DBSession,
     logger: AppLoggerDep,
@@ -124,20 +125,31 @@ async def get_national_team_by_country(
 
 
 @router.get("/nation-dist", response_model=NationDistResponse)
-async def get_nation_dist(
+def get_nation_dist(
     session: DBSession,
     logger: AppLoggerDep,
     season_year: int = Query(..., description="Season year (e.g. 2026)"),
-    stat: str = Query("goals", description="Stat to sort league_dist by: goals, assists, minutes, goals_assists"),
+    stat: str = Query(
+        "goals",
+        description="Stat to sort league_dist by: goals, assists, minutes, goals_assists",
+    ),
     country_id: Optional[int] = Query(None, description="Primary country ID"),
-    country2_id: Optional[int] = Query(None, description="Secondary country ID (optional)"),
+    country2_id: Optional[int] = Query(
+        None, description="Secondary country ID (optional)"
+    ),
 ):
     if country_id is None and country2_id is None:
-        raise HTTPException(status_code=400, detail="At least one of country_id or country2_id is required")
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of country_id or country2_id is required",
+        )
 
     stat_col = "assists" if stat == "assist" else stat
     if stat_col not in _WC_STAT_COLS:
-        raise HTTPException(status_code=400, detail=f"Invalid stat. Valid options: {', '.join(sorted(_WC_STAT_COLS))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stat. Valid options: {', '.join(sorted(_WC_STAT_COLS))}",
+        )
 
     if stat_col == "goals_assists":
         stat_expr = "COALESCE(pms.goals, 0) + COALESCE(pms.assists, 0)"
@@ -222,7 +234,9 @@ async def get_nation_dist(
     if country2_id is not None:
         params["country2_id"] = country2_id
 
-    logger.info(f"nation-dist country_id={country_id}, country2_id={country2_id}, stat={stat_col}, season_year={season_year}")
+    logger.info(
+        f"nation-dist country_id={country_id}, country2_id={country2_id}, stat={stat_col}, season_year={season_year}"
+    )
 
     query = text(f"""
         WITH
@@ -588,36 +602,154 @@ async def get_nation_dist(
     return result[0] if result else {"data": {"matches": [], "league_dist": []}}
 
 
-@router.get("/{team_id}", response_model=TeamResponse)
-async def get_team(
+# get team data
+_TEAM_MATCH_OBJ = """json_build_object(
+    'match_id',        match_id,
+    'match_date',      match_date::text,
+    'match_time_utc',  match_time_utc::text,
+    'home_team', json_build_object(
+        'team_id',     ht_id,     'team_name',   ht_name,
+        'common_name', ht_common, 'short_name',  ht_short,
+        'logo_url',    ht_logo,   'level',       ht_level,
+        'type',        ht_type,
+        'country', CASE WHEN htc_id IS NULL THEN NULL ELSE json_build_object(
+            'country_id', htc_id, 'name', htc_name, 'flag_url', htc_flag,
+            'continent', htc_continent, 'iso_code_3', htc_iso) END
+    ),
+    'home_stats', json_build_object('goals', home_goals, 'penalty_goals', pen_home_goals),
+    'away_team', json_build_object(
+        'team_id',     at_id,     'team_name',   at_name,
+        'common_name', at_common, 'short_name',  at_short,
+        'logo_url',    at_logo,   'level',       at_level,
+        'type',        at_type,
+        'country', CASE WHEN atc_id IS NULL THEN NULL ELSE json_build_object(
+            'country_id', atc_id, 'name', atc_name, 'flag_url', atc_flag,
+            'continent', atc_continent, 'iso_code_3', atc_iso) END
+    ),
+    'away_stats', json_build_object('goals', away_goals, 'penalty_goals', pen_away_goals),
+    'win_team_id',     win_team,
+    'loss_team_id',    loss_team,
+    'isdraw',          isdraw,
+    'pens',            pens,
+    'extra_time',      extra_time,
+    'isplayed',        isplayed,
+    'round',           round,
+    'gameweek_number', gameweek_number
+)"""
+
+
+# team season data
+@router.get("/{team_id}", response_model=TeamDataResponse)
+def get_team(
     team_id: int,
     session: DBSession,
     logger: AppLoggerDep,
 ):
     logger.info(f"Fetching team detail for team_id: {team_id}")
 
-    query = text("""
+    query = text(f"""
+        WITH
+        team_base AS (
+            SELECT
+                t.team_id, t.name, t.common_name, t.short_name, t.logo_url, t.level, t.type,
+                t.color_hex,
+                c.country_id  AS tc_id, c.name  AS tc_name, c.flag_url  AS tc_flag,
+                c.continent   AS tc_continent, c.iso_code_3  AS tc_iso,
+                l.league_id, l.name AS league_name, l.tier_level, l.format,
+                l.competition_level, l.scope,
+                (SELECT comp2.logo_url FROM competitions comp2
+                 WHERE comp2.league_id = l.league_id
+                 ORDER BY comp2.season_year DESC LIMIT 1) AS league_logo_url,
+                lc.country_id AS lc_id, lc.name AS lc_name, lc.flag_url AS lc_flag,
+                lc.continent  AS lc_continent, lc.iso_code_3 AS lc_iso,
+                iu.username AS ig_handle, iu.follower_count AS ig_follower_count,
+                tu.handle   AS twitter_handle, tu.followers_count AS twitter_follower_count
+            FROM teams t
+            LEFT JOIN countries c ON c.country_id = t.country_id
+            LEFT JOIN leagues l ON l.league_id = t.league_id
+            LEFT JOIN countries lc ON lc.country_id = l.country_id
+            LEFT JOIN instagram_users iu ON iu.username = t.instagram_user_id
+            LEFT JOIN twitter_users tu ON tu.rest_id = t.twitter_user_rest_id
+            WHERE t.team_id = :team_id
+        ),
+        match_rows AS (
+            SELECT
+                m.match_id, m.match_date, m.match_time_utc,
+                m.home_goals, m.away_goals, m.pen_home_goals, m.pen_away_goals,
+                m.win_team, m.loss_team, m.isdraw, m.pens, m.extra_time, m.isplayed,
+                m.round, m.gameweek_number,
+                ht.team_id AS ht_id, ht.name AS ht_name, ht.common_name AS ht_common,
+                ht.short_name AS ht_short, ht.logo_url AS ht_logo, ht.level AS ht_level, ht.type AS ht_type,
+                htc.country_id AS htc_id, htc.name AS htc_name, htc.flag_url AS htc_flag,
+                htc.continent AS htc_continent, htc.iso_code_3 AS htc_iso,
+                awt.team_id AS at_id, awt.name AS at_name, awt.common_name AS at_common,
+                awt.short_name AS at_short, awt.logo_url AS at_logo, awt.level AS at_level, awt.type AS at_type,
+                atc.country_id AS atc_id, atc.name AS atc_name, atc.flag_url AS atc_flag,
+                atc.continent AS atc_continent, atc.iso_code_3 AS atc_iso,
+                COALESCE(m.match_time_utc, m.match_date::timestamp) AS sort_ts
+            FROM matches m
+            JOIN teams ht ON ht.team_id = m.home_id
+            LEFT JOIN countries htc ON htc.country_id = ht.country_id
+            JOIN teams awt ON awt.team_id = m.away_id
+            LEFT JOIN countries atc ON atc.country_id = awt.country_id
+            WHERE m.home_id = :team_id OR m.away_id = :team_id
+        ),
+        fixtures AS (
+            SELECT * FROM match_rows
+            WHERE sort_ts > NOW() AT TIME ZONE 'UTC'
+            ORDER BY sort_ts ASC
+            LIMIT 5
+        ),
+        results AS (
+            SELECT * FROM match_rows
+            WHERE sort_ts <= NOW() AT TIME ZONE 'UTC'
+            ORDER BY sort_ts DESC
+            LIMIT 5
+        ),
+        fixtures_agg AS (
+            SELECT COALESCE(json_agg({_TEAM_MATCH_OBJ} ORDER BY sort_ts ASC), '[]'::json) AS matches_json
+            FROM fixtures
+        ),
+        results_agg AS (
+            SELECT COALESCE(json_agg({_TEAM_MATCH_OBJ} ORDER BY sort_ts DESC), '[]'::json) AS matches_json
+            FROM results
+        )
         SELECT json_build_object(
             'data', json_build_object(
-                'team_id',     t.team_id,
-                'team_name',   t.name,
-                'common_name', t.common_name,
-                'short_name',  t.short_name,
-                'logo_url',    t.logo_url,
-                'level',       t.level,
-                'type',        t.type,
-                'country', json_build_object(
-                    'country_id', c.country_id,
-                    'name',       c.name,
-                    'flag_url',   c.flag_url,
-                    'continent',  c.continent,
-                    'iso_code_3', c.iso_code_3
-                )
+                'team', json_build_object(
+                    'team_id',     tb.team_id,
+                    'team_name',   tb.name,
+                    'common_name', tb.common_name,
+                    'short_name',  tb.short_name,
+                    'logo_url',    tb.logo_url,
+                    'level',       tb.level,
+                    'type',        tb.type,
+                    'country', CASE WHEN tb.tc_id IS NULL THEN NULL ELSE json_build_object(
+                        'country_id', tb.tc_id, 'name', tb.tc_name, 'flag_url', tb.tc_flag,
+                        'continent', tb.tc_continent, 'iso_code_3', tb.tc_iso) END
+                ),
+                'league', CASE WHEN tb.league_id IS NULL THEN NULL ELSE json_build_object(
+                    'league_id',        tb.league_id,
+                    'league_name',      tb.league_name,
+                    'tier_level',       tb.tier_level,
+                    'format',           tb.format,
+                    'competiton_level', tb.competition_level,
+                    'scope',            tb.scope,
+                    'logo_url',         tb.league_logo_url,
+                    'country', CASE WHEN tb.lc_id IS NULL THEN NULL ELSE json_build_object(
+                        'country_id', tb.lc_id, 'name', tb.lc_name, 'flag_url', tb.lc_flag,
+                        'continent', tb.lc_continent, 'iso_code_3', tb.lc_iso) END
+                ) END,
+                'color_hex',              tb.color_hex,
+                'twitter_handle',         tb.twitter_handle,
+                'twitter_follower_count', tb.twitter_follower_count,
+                'ig_handle',              tb.ig_handle,
+                'ig_follower_count',      tb.ig_follower_count,
+                'fixtures', fa.matches_json,
+                'results',  ra.matches_json
             )
         )
-        FROM teams t
-        LEFT JOIN countries c ON c.country_id = t.country_id
-        WHERE t.team_id = :team_id
+        FROM team_base tb, fixtures_agg fa, results_agg ra
     """)
 
     result = session.exec(query, params={"team_id": team_id}).first()
@@ -626,12 +758,16 @@ async def get_team(
     return result[0]
 
 
-# get torunament squad
+# team season summary
+
+
+# get tournament squad
 @router.get("/{team_id}/squad/{league_id}", response_model=TeamResponse)
-async def get_comp_squad(
+def get_comp_squad(
     team_id: int,
+    league_id: int,
     session: DBSession,
     logger: AppLoggerDep,
 ):
-    logger.info(f"Fetching team detail for team_id: {team_id}")
-
+    logger.info(f"Fetching squad for team_id={team_id} league_id={league_id}")
+    raise HTTPException(status_code=501, detail="Not implemented")

@@ -6,6 +6,7 @@ class Country(BaseModel):
     country_id: int
     name: str
     flag_url: Optional[str] = None
+    circle_url: Optional[str] = None
     continent: Optional[str] = None
     iso_code_3: Optional[str] = None
 

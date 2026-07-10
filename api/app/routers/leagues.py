@@ -1,12 +1,34 @@
 from datetime import date, timedelta
-from sqlalchemy import text
 from typing import List, Optional
-from fastapi import APIRouter, Query, HTTPException
 
-from ..dependencies import DBSession, AppLoggerDep
-from ..models.league import LeagueListResponse, LeagueStandingsResponse, LeagueStatsResponse, LeagueStatsbyDateResponse, LeagueStatsByDateData, BestLoaneesResponse, LongestDroughtsReponse
-from ..models.match import CompetitionSquadsResponse
-from ..constants import STAT_COLUMNS, BYDATE_STAT_COLUMNS, DEFAULT_LEAGUE_IDS, POSITION_GROUPS
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import text
+
+from ..constants import (
+    BYDATE_STAT_COLUMNS,
+    DEFAULT_LEAGUE_IDS,
+    POSITION_GROUPS,
+    STAT_COLUMNS,
+)
+from ..dependencies import AppLoggerDep, DBSession
+from ..models.league import (
+    BestLoaneesResponse,
+    LeagueListResponse,
+    LeagueStandingsResponse,
+    LeagueStatsByDateData,
+    LeagueStatsbyDateResponse,
+    LeagueStatsResponse,
+    LongestDroughtsReponse,
+)
+from ..models.match import CompetitionSquadsResponse, MatchesByDateResponse
+from .matches import (
+    _AGG_EXPR,
+    _AGG_FROM,
+    _BASE_COLS_BYDATE,
+    _BASE_JOINS_BYDATE,
+    _COMP_DATA_CTE,
+    _MATCH_OBJS_CTE,
+)
 
 router = APIRouter(
     prefix="/v1/leagues",
@@ -15,7 +37,7 @@ router = APIRouter(
 
 
 @router.get("/", response_model=LeagueListResponse)
-async def list_leagues(
+def list_leagues(
     session: DBSession,
     logger: AppLoggerDep,
 ):
@@ -56,25 +78,103 @@ async def list_leagues(
     return result[0] if result else {"data": []}
 
 
+# get matches of a league within date range
+@router.get("/{league_id}/matches", response_model=MatchesByDateResponse)
+def get_league_matches(
+    league_id: int,
+    session: DBSession,
+    logger: AppLoggerDep,
+    start_date: Optional[date] = Query(
+        default=None, description="Start date, defaults to one week ago"
+    ),
+    end_date: Optional[date] = Query(
+        default=None, description="End date, defaults to today"
+    ),
+):
+    today = date.today()
+    resolved_end = end_date or today
+    resolved_start = start_date or (today - timedelta(weeks=1))
+
+    logger.info(
+        f"Fetching matches for league_id={league_id} between {resolved_start} and {resolved_end}"
+    )
+
+    query = text(f"""
+        WITH
+        team_recent_home_colors AS MATERIALIZED (
+            SELECT DISTINCT ON (home_id) home_id AS team_id, home_color
+            FROM matches
+            WHERE match_date >= CAST(:end_date AS date) - INTERVAL '2 months'
+              AND match_date <= :end_date
+              AND home_color IS NOT NULL
+            ORDER BY home_id, match_date DESC
+        ),
+        team_recent_away_colors AS MATERIALIZED (
+            SELECT DISTINCT ON (away_id) away_id AS team_id, away_color
+            FROM matches
+            WHERE match_date >= CAST(:end_date AS date) - INTERVAL '2 months'
+              AND match_date <= :end_date
+              AND away_color IS NOT NULL
+            ORDER BY away_id, match_date DESC
+        ),
+        base AS (
+            SELECT {_BASE_COLS_BYDATE}
+            {_BASE_JOINS_BYDATE}
+            WHERE m.match_date BETWEEN :start_date AND :end_date
+            AND comp.league_id = :league_id
+            AND m.isplayed IS NOT NULL
+        ),
+        {_COMP_DATA_CTE},
+        {_MATCH_OBJS_CTE}
+        SELECT json_build_object('data', {_AGG_EXPR})
+        {_AGG_FROM}
+    """)
+
+    result = session.exec(
+        query,
+        params={
+            "start_date": resolved_start,
+            "end_date": resolved_end,
+            "league_id": league_id,
+        },
+    ).first()
+    return result[0] if result else {"data": []}
+
+
 # get player stats by league_id (s)
 @router.get("/stats/{season_year}", response_model=LeagueStatsResponse)
-async def get_league_stats(
+def get_league_stats(
     season_year: int,
     session: DBSession,
     logger: AppLoggerDep,
-    league_ids: List[int] = Query( description="One or more league IDs"),
-    stat: str = Query("goals", description=f"Stat to sort by: {', '.join(sorted(STAT_COLUMNS))}"),
+    league_ids: List[int] = Query(description="One or more league IDs"),
+    stat: str = Query(
+        "goals", description=f"Stat to sort by: {', '.join(sorted(STAT_COLUMNS))}"
+    ),
     limit: int = Query(15, description="Maximum number of players to return"),
-    country_id: Optional[int] = Query(None, description="Filter by player primary country"),
-    country2_id: Optional[int] = Query(None, description="Filter by player secondary country"),
-    age: Optional[int] = Query(None, description="Max age filter (from player_comp_stats.age)"),
-    position: Optional[str] = Query(None, description="Filter by position (checks position and other_positions)"),
+    country_id: Optional[int] = Query(
+        None, description="Filter by player primary country"
+    ),
+    country2_id: Optional[int] = Query(
+        None, description="Filter by player secondary country"
+    ),
+    age: Optional[int] = Query(
+        None, description="Max age filter (from player_comp_stats.age)"
+    ),
+    position: Optional[str] = Query(
+        None, description="Filter by position (checks position and other_positions)"
+    ),
 ):
     if stat not in STAT_COLUMNS:
-        raise HTTPException(status_code=400, detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(STAT_COLUMNS))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(STAT_COLUMNS))}",
+        )
 
     stat_col = stat
-    logger.info(f"Fetching league stats for season_year={season_year}, league_ids={league_ids}, stat={stat}, limit={limit}")
+    logger.info(
+        f"Fetching league stats for season_year={season_year}, league_ids={league_ids}, stat={stat}, limit={limit}"
+    )
 
     country_filter = ""
     if country_id is not None:
@@ -89,7 +189,11 @@ async def get_league_stats(
     position_group = POSITION_GROUPS.get(position.lower()) if position else None
     position_filter = ""
     if position is not None:
-        position_filter = " AND p.position = ANY(:positions)" if position_group else " AND p.position ILIKE :position"
+        position_filter = (
+            " AND p.position = ANY(:positions)"
+            if position_group
+            else " AND p.position ILIKE :position"
+        )
 
     params = {
         "league_ids": league_ids,
@@ -103,7 +207,9 @@ async def get_league_stats(
     if age is not None:
         params["age"] = age
     if position is not None:
-        params["positions" if position_group else "position"] = position_group or position
+        params["positions" if position_group else "position"] = (
+            position_group or position
+        )
 
     query = text(f"""
         WITH
@@ -267,28 +373,43 @@ async def get_league_stats(
 
     return result[0] if result else {"data": {}}
 
+
 # get player stats by date
 @router.get("/stats-bydate", response_model=LeagueStatsbyDateResponse)
-async def get_league_stats_bydate(
+def get_league_stats_bydate(
     session: DBSession,
     logger: AppLoggerDep,
-    league_ids: List[int] = Query(default=DEFAULT_LEAGUE_IDS, description="One or more league IDs"),
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD), default 3 weeks ago"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD), default today"),
-    stat: str = Query("goals", description=f"Stat to sort by: {', '.join(sorted(BYDATE_STAT_COLUMNS))}"),
+    league_ids: List[int] = Query(
+        default=DEFAULT_LEAGUE_IDS, description="One or more league IDs"
+    ),
+    start_date: Optional[str] = Query(
+        None, description="Start date (YYYY-MM-DD), default 3 weeks ago"
+    ),
+    end_date: Optional[str] = Query(
+        None, description="End date (YYYY-MM-DD), default today"
+    ),
+    stat: str = Query(
+        "goals",
+        description=f"Stat to sort by: {', '.join(sorted(BYDATE_STAT_COLUMNS))}",
+    ),
     limit: int = Query(15, description="Maximum number of players to return"),
     age: Optional[int] = Query(None, description="Max age filter (from players.age)"),
     position: Optional[str] = Query(None, description="Filter by position"),
 ):
     if stat not in BYDATE_STAT_COLUMNS:
-        raise HTTPException(status_code=400, detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(BYDATE_STAT_COLUMNS))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(BYDATE_STAT_COLUMNS))}",
+        )
 
     today = date.today()
     resolved_end = end_date or today.isoformat()
     resolved_start = start_date or (today - timedelta(weeks=3)).isoformat()
 
     stat_col = stat
-    logger.info(f"Fetching bydate stats for league_ids={league_ids}, {resolved_start} to {resolved_end}, stat={stat}")
+    logger.info(
+        f"Fetching bydate stats for league_ids={league_ids}, {resolved_start} to {resolved_end}, stat={stat}"
+    )
 
     age_filter = ""
     if age is not None:
@@ -297,7 +418,11 @@ async def get_league_stats_bydate(
     position_group = POSITION_GROUPS.get(position.lower()) if position else None
     position_filter = ""
     if position is not None:
-        position_filter = " AND p.position = ANY(:positions)" if position_group else " AND p.position ILIKE :position"
+        position_filter = (
+            " AND p.position = ANY(:positions)"
+            if position_group
+            else " AND p.position ILIKE :position"
+        )
 
     params = {
         "league_ids": league_ids,
@@ -308,7 +433,9 @@ async def get_league_stats_bydate(
     if age is not None:
         params["age"] = age
     if position is not None:
-        params["positions" if position_group else "position"] = position_group or position
+        params["positions" if position_group else "position"] = (
+            position_group or position
+        )
 
     query = text(f"""
         WITH
@@ -457,17 +584,30 @@ async def get_league_stats_bydate(
     """)
 
     result = session.exec(query, params=params).first()
-    return result[0] if result else {"data": {"start_date": resolved_start, "end_date": resolved_end, "players": []}}
+    return (
+        result[0]
+        if result
+        else {
+            "data": {
+                "start_date": resolved_start,
+                "end_date": resolved_end,
+                "players": [],
+            }
+        }
+    )
+
 
 # get league standings
 @router.get("/{league_id}/standings", response_model=LeagueStandingsResponse)
-async def get_league_standings(
+def get_league_standings(
     league_id: int,
     session: DBSession,
     logger: AppLoggerDep,
     season_year: int = Query(..., description="Season year (e.g. 2024)"),
 ):
-    logger.info(f"Fetching standings for league_id: {league_id}, season_year: {season_year}")
+    logger.info(
+        f"Fetching standings for league_id: {league_id}, season_year: {season_year}"
+    )
 
     query = text("""
         SELECT json_build_object(
@@ -512,29 +652,39 @@ async def get_league_standings(
         ) sub
     """)
 
-    result = session.exec(query, params={"league_id": league_id, "season_year": season_year}).first()
+    result = session.exec(
+        query, params={"league_id": league_id, "season_year": season_year}
+    ).first()
     return result[0] if result else {"data": []}
 
 
 # get best loan players currently
 @router.get("/best-loanees", response_model=BestLoaneesResponse)
-async def get_best_loanees(
+def get_best_loanees(
     session: DBSession,
     logger: AppLoggerDep,
     start_date: str = Query("2025-07-01", description="Loan window start (YYYY-MM-DD)"),
     end_date: str = Query("2026-06-30", description="Loan window end (YYYY-MM-DD)"),
-    stat: str = Query("goals", description=f"Stat to sort by: {', '.join(sorted(STAT_COLUMNS))}"),
+    stat: str = Query(
+        "goals", description=f"Stat to sort by: {', '.join(sorted(STAT_COLUMNS))}"
+    ),
     limit: int = Query(20, description="Maximum number of players to return"),
 ):
     if stat not in STAT_COLUMNS:
-        raise HTTPException(status_code=400, detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(STAT_COLUMNS))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(STAT_COLUMNS))}",
+        )
 
     from datetime import datetime as dt
+
     start_year = dt.strptime(start_date, "%Y-%m-%d").year
     end_year = dt.strptime(end_date, "%Y-%m-%d").year
     stat_col = stat
 
-    logger.info(f"Fetching best loanees: {start_date} to {end_date}, stat={stat}, limit={limit}")
+    logger.info(
+        f"Fetching best loanees: {start_date} to {end_date}, stat={stat}, limit={limit}"
+    )
 
     params = {
         "start_date": start_date,
@@ -813,22 +963,33 @@ async def get_best_loanees(
     result = session.exec(query, params=params).first()
     return result[0] if result else {"data": []}
 
+
 DROUGHT_STATS = {"goals", "assists", "goals_or_assists"}
+
 
 # get longest goal/assist droughts
 @router.get("/droughts/{season_year}", response_model=LongestDroughtsReponse)
-async def get_longest_droughts(
+def get_longest_droughts(
     season_year: int,
     session: DBSession,
     logger: AppLoggerDep,
-    league_ids: List[int] = Query(default=DEFAULT_LEAGUE_IDS, description="One or more league IDs"),
-    stat: str = Query("goals", description="Drought type: goals, assists, goals_or_assists"),
+    league_ids: List[int] = Query(
+        default=DEFAULT_LEAGUE_IDS, description="One or more league IDs"
+    ),
+    stat: str = Query(
+        "goals", description="Drought type: goals, assists, goals_or_assists"
+    ),
     limit: int = Query(15, description="Maximum number of players to return"),
 ):
     if stat not in DROUGHT_STATS:
-        raise HTTPException(status_code=400, detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(DROUGHT_STATS))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stat '{stat}'. Valid options: {', '.join(sorted(DROUGHT_STATS))}",
+        )
 
-    logger.info(f"Fetching droughts: league_ids={league_ids}, season_year={season_year}, stat={stat}")
+    logger.info(
+        f"Fetching droughts: league_ids={league_ids}, season_year={season_year}, stat={stat}"
+    )
 
     if stat == "goals":
         last_events_sql = """
@@ -1166,15 +1327,20 @@ async def get_longest_droughts(
 
 
 # get international competition squads
-@router.get("/{league_id}/squads/{season_year}/{country_id}", response_model=CompetitionSquadsResponse)
-async def get_competition_squads(
+@router.get(
+    "/{league_id}/squads/{season_year}/{country_id}",
+    response_model=CompetitionSquadsResponse,
+)
+def get_competition_squads(
     league_id: int,
     season_year: int,
     country_id: int,
     session: DBSession,
     logger: AppLoggerDep,
 ):
-    logger.info(f"Fetching squads league_id={league_id}, season_year={season_year}, country_id={country_id}")
+    logger.info(
+        f"Fetching squads league_id={league_id}, season_year={season_year}, country_id={country_id}"
+    )
 
     query = text("""
         WITH
@@ -1408,11 +1574,14 @@ async def get_competition_squads(
         FROM nat_team nt, comp c
     """)
 
-    result = session.exec(query, params={
-        "league_id": league_id,
-        "season_year": season_year,
-        "country_id": country_id,
-    }).first()
+    result = session.exec(
+        query,
+        params={
+            "league_id": league_id,
+            "season_year": season_year,
+            "country_id": country_id,
+        },
+    ).first()
     if not result or result[0].get("data") is None:
         raise HTTPException(status_code=404, detail="Squad not found")
     return result[0]

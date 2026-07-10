@@ -9,6 +9,8 @@ class Profile(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    country_id: Optional[int] = None
+    favourite_team_id: Optional[int] = None
     total_predictions: int = 0
     correct_predictions: int = 0
     overall_rank: Optional[int] = None
@@ -25,6 +27,8 @@ class ProfileUpdateRequest(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    country_id: Optional[int] = None
+    favourite_team_id: Optional[int] = None
 
     @field_validator("username")
     @classmethod

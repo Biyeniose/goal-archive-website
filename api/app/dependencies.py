@@ -1,7 +1,7 @@
 # app/dependencies.py
 import os
 import logging
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session
@@ -57,3 +57,26 @@ def get_current_user(
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
 CurrentUser = Annotated[str, Depends(get_current_user)]
+
+
+_bearer_optional = HTTPBearer(auto_error=False)
+
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_optional),
+) -> Optional[str]:
+    """Like get_current_user, but for endpoints that are public and only need
+    to know *who's asking* (if anyone) rather than requiring a session."""
+    if credentials is None:
+        return None
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            os.environ.get("JWT_SECRET", ""),
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
+        return payload.get("sub") or None
+    except jwt.InvalidTokenError:
+        return None
+
+OptionalCurrentUser = Annotated[Optional[str], Depends(get_current_user_optional)]

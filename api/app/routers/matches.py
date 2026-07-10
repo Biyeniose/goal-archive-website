@@ -725,7 +725,7 @@ _AGG_FROM = """FROM comp_data cd
 
 #@router.get("", response_model=MatchesByDateResponse)
 @router.get("/bydate", response_model=MatchesByDateResponse)
-async def get_matches_bydate(
+def get_matches_bydate(
     session: DBSession,
     logger: AppLoggerDep,
     match_date: Optional[str] = Query(default=None, description="Date in YYYY-MM-DD format, defaults to today"),
@@ -776,7 +776,7 @@ async def get_matches_bydate(
 # ─── match data route (single query) ─────────────────────────────────────────
 
 @router.get("/{match_id}/data", response_model=MatchDetailsResponse)
-async def get_match_data(
+def get_match_data(
     match_id: int,
     session: DBSession,
     logger: AppLoggerDep,
@@ -1461,7 +1461,7 @@ async def get_match_data(
 
 # get polym markets forecast history
 @router.get("/{match_id}/polym", response_model=PolymForecastResponse)
-async def get_polym_markets(
+def get_polym_markets(
     match_id: int,
     session: DBSession,
     logger: AppLoggerDep,
@@ -1723,7 +1723,7 @@ async def get_polym_markets(
 
 # get kalshi markets forecast history
 @router.get("/{match_id}/kalshi", response_model=KalshiForecastResponse)
-async def get_kalshi_markets(
+def get_kalshi_markets(
     match_id: int,
     session: DBSession,
     logger: AppLoggerDep,
